@@ -17,3 +17,8 @@ class PredictionRequest(BaseModel):
 class PredictionResponse(BaseModel):
     designation: str
     predictions: List[CategoryScore]
+
+class ModelReloadResponse(BaseModel):
+    status: str
+    message: Optional[str] = None
+    reload_time_seconds: Optional[float] = None

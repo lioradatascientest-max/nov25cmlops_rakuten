@@ -1,227 +1,77 @@
 from __future__ import annotations
-
 from typing import Any, Dict
-
 from fastapi import FastAPI, HTTPException
 from loguru import logger
-import docker
+import os
 
+EXECUTION_MODE = os.getenv("EXECUTION_MODE", "cli")
 
-app = FastAPI(title="Rakuten Train API", version="1.0.0")
-DVC_RUNNER_CONTAINER = "rakuten-dvc-runner"
+if EXECUTION_MODE == "docker":
+    from mlops_rakuten.utils.docker import _dvc, sync_training_results
+    SYNC_MODE = None  # docker_utils hardcode "Docker-DID"
+    logger.info("Transport : docker exec (Docker-DID)")
+else:
+    from mlops_rakuten.utils.cli import _dvc, sync_training_results
+    SYNC_MODE = "Docker-CLI"
+    logger.info("Transport : subprocess (Docker-CLI)")
 
-# Initialisation du client Docker
-docker_client = docker.from_env()
-
-# Fonction pour exécuter des commandes DVC dans le conteneur dédié
-def dvc_runner(cmd: str) -> str:
-    """Exécute une commande DVC dans le conteneur DVC dédié et retourne la sortie."""
-    try:
-        container = docker_client.containers.get(DVC_RUNNER_CONTAINER)
-        
-        # Exécute la commande
-        exit_code, output = container.exec_run(
-            f"bash -c 'cd /app && {cmd}'",
-            stream=False  # Attends la fin
-        )
-        
-        output_str = output.decode('utf-8')
-        for line in output_str.split('\n'):
-            if not line.strip():
-                continue
-            if 'ERROR' in line:
-                logger.error(line)
-            elif 'SUCCESS' in line:
-                logger.success(line)
-            elif 'WARNING' in line:
-                logger.warning(line)
-            else:
-                logger.info(line)
-        
-        if exit_code != 0:
-            raise RuntimeError(f"DVC echoue avec code de sortie {exit_code}")
-        
-        logger.info(f"{cmd} terminé avec succès")
-        return output_str
-    
-    except docker.errors.NotFound:
-        logger.error(f"Container {DVC_RUNNER_CONTAINER} non trouvé")
-        raise HTTPException(status_code=503, detail="DVC runner non disponible")
-    except Exception as e:
-        logger.error(f"Docker error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-def git_runner(cmd: str) -> str:
-    """Exécute une commande Git dans le conteneur dédié et retourne la sortie."""
-    try:
-        container = docker_client.containers.get(DVC_RUNNER_CONTAINER)
-        
-        # Exécute la commande
-        exit_code, output = container.exec_run(
-            f"bash -c 'cd /app && {cmd}'",
-            stream=False
-        )
-        
-        output_str = output.decode('utf-8')
-        for line in output_str.split('\n'):
-            if not line.strip():
-                continue
-            if 'ERROR' in line or 'fatal' in line:
-                logger.error(line)
-            else:
-                logger.info(line)
-        
-        if exit_code != 0:
-            if exit_code == 1 and "nothing to commit" in output_str:  # Traiter exit code 1 + "nothing to commit" comme un succès silencieux :
-                return output_str  # Pas une erreur
-            raise RuntimeError(f"Git failed with exit code {exit_code}")
-        
-        logger.info(f"{cmd} completed successfully")
-        return output_str
-    
-    except docker.errors.NotFound:
-        logger.error(f"Container {DVC_RUNNER_CONTAINER} not found")
-        raise HTTPException(status_code=503, detail="Git runner not available")
-    except Exception as e:
-        logger.error(f"Docker error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-def sync_training_results() -> Dict[str, Any]:
-    """
-    Sync training results to Git and DVC remotes.
-    
-    Steps:
-    1. DVC push (push models + metrics to DagsHub)
-    2. Git add (stage dvc.lock)
-    3. Git commit (commit training results)
-    4. Git push (push to GitHub)
-    """
-    try:
-        logger.info("[Sync] Starting Git+DVC synchronization...")
-        
-        # Step 1: Push to DVC remote
-        logger.info("[Sync] Step 1: Pushing to DVC remote...")
-        dvc_runner("dvc push")
-        
-        # Step 2: Stage DVC files
-        logger.info("[Sync] Step 2: Staging files with Git...")
-        git_runner("git add dvc.lock")
-        
-        # Step 3: Commit
-        logger.info("[Sync] Step 3: Committing with message...")
-        commit_msg = "training: Model training pipeline complete"
-        commit_output = git_runner(f'git commit -m "{commit_msg}"')
-        
-        nothing_to_commit = any(
-            msg in commit_output
-            for msg in ["nothing to commit", "nothing added to commit"]
-        )
-
-        if nothing_to_commit:
-            logger.info("[Sync] Nothing new to commit (dvc.lock unchanged) — skipping git push")
-            return {
-                "status": "synced",
-                "dvc_push": "✓",
-                "git_commit": "skipped (nothing to commit)",
-                "git_push": "skipped (no new commit)"
-            }
-
-        
-        # Step 4: Push to GitHub
-        logger.info("[Sync] Step 4: Pushing to GitHub...")
-        # Get current branch
-        branch = git_runner("git rev-parse --abbrev-ref HEAD").strip()
-        git_runner(f"git push myfork {branch}")
-        
-        logger.success("[Sync] ✓ All files synced to Git and DVC!")
-        
-        return {
-            "status": "synced",
-            "dvc_push": "✓",
-            "git_commit": "✓",
-            "git_push": "✓"
-        }
-    
-    except RuntimeError as e:
-        logger.error(f"[Sync] Failed: {e}")
-        return {
-            "status": "error",
-            "error": str(e)
-        }
-    except Exception as e:
-        logger.error(f"[Sync] Unexpected error: {e}")
-        return {
-            "status": "error",
-            "error": str(e)
-        }
+app = FastAPI(
+    title="Rakuten Train API",
+    version="1.0.0",
+    description=f"Mode d'exécution actuel : **{EXECUTION_MODE}**",
+)
 
 
 @app.get("/health")
 def health() -> Dict[str, str]:
-    return {"status": "ok"}
+    return {"status": "ok", "execution_mode": EXECUTION_MODE}
 
 
 @app.post("/train")
 def train() -> Dict[str, Any]:
-    """
-    Execute the full training pipeline:
-    1. DVC repro (run all stages: preprocess → transform → train → evaluate)
-    2. DVC push (push models/metrics to DagsHub S3)
-    3. Git sync (commit + push dvc.lock to GitHub)
-    """
     try:
-        logger.info("=" * 80)
-        logger.info("🚀 Starting Training Pipeline...")
-        logger.info("=" * 80)
+        logger.info("=" * 60)
+        logger.info("Starting Training Pipeline...")
+        
+        # --- AJOUT : Configuration du Token DagsHub ---
+        # On utilise --local pour ne pas modifier le fichier dvc/config qui est versionné par Git
+        #dagshub_token = os.getenv("DAGSHUB_TOKEN")
+        #logger.info("Configuring DVC authentication...")
+        #_dvc("dvc remote modify --local storage --unset auth") 
+        #_dvc(f"dvc remote modify --local storage user samuel.beau")
+        #_dvc(f"dvc remote modify --local storage password {dagshub_token}")
+        #_dvc("dvc remote modify --local storage auth basic")
+        # ----------------------------------------------
 
-        # Pull latest data and code from DagsHub
-        logger.info("Pulling from DVC remote...")
-        dvc_runner("dvc pull")
-        
-        # DVC repro exécute tous les stages depuis le preprocess
-        # Si rakuten_train.csv a changé, tout sera relancé depuis le preprocess
-        logger.info("📊 Running DVC pipeline (preprocess → transform → train → evaluate)...")
-        dvc_runner("dvc repro")
-        
-        # Sync results to Git + DVC
-        logger.info("🔄 Syncing training results to Git and DVC...")
-        sync_results = sync_training_results()
-        
-        if sync_results["status"] == "error":
-            logger.error(f"Sync failed: {sync_results['error']}")
+
+        # ici le true permet de ne pas échouer si il y a deja des elements dans le cache distant, on veut juste s'assurer d'avoir la derniere version avant de lancer le repro et ecraser les changements locaux.
+        _dvc("dvc pull 2>&1 || true")
+        _dvc("dvc repro")
+
+        # sync_training_results lit la config en interne pour model_version/f1/run_id
+        sync_results = sync_training_results(mode=SYNC_MODE)
+
+        if not sync_results["summary"]["success"]:
             return {
                 "status": "training_complete_sync_failed",
-                "stages": ["preprocess", "transform", "train", "evaluate"],
-                "message": "Training succeeded but sync failed",
-                "sync_error": sync_results["error"],
+                "message": "Training succeeded but git+dvc sync failed",
+                "sync_errors": sync_results["errors"],
                 "manual_steps": [
                     "1. git add dvc.lock models/ reports/",
-                    "2. git commit -m 'training: Model training pipeline complete'",
-                    "3. git push origin <branch>"
-                ]
+                    "2. git commit -m 'training: pipeline complete'",
+                    "3. git push origin <branch>",
+                ],
             }
-        
-        logger.success("=" * 80)
-        logger.success("✅ Training Pipeline Complete!")
-        logger.success("=" * 80)
-        
+
+        logger.success("Training Pipeline Complete!")
         return {
             "status": "complete",
-            "stages": ["preprocess", "transform", "train", "evaluate"],
+            "stages": ["transform", "train", "evaluate"],
             "message": "All stages executed and synced successfully",
-            "sync": sync_results,
-            "details": {
-                "dvc_push": "Models and metrics pushed to DagsHub",
-                "git_commit": "dvc.lock committed",
-                "git_push": "Changes pushed to GitHub"
-            }
+            "sync_summary": sync_results["summary"],
         }
-        
+
     except RuntimeError as e:
-        logger.error(f"❌ DVC pipeline failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
-        logger.error(f"❌ Unexpected error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

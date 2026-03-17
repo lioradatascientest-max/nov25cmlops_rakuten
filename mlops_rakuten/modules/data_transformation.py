@@ -11,7 +11,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 
 from mlops_rakuten.config.entities import DataTransformationConfig
-from mlops_rakuten.utils import create_directories
+from mlops_rakuten.utils.utils import create_directories
 
 
 class DataTransformation:

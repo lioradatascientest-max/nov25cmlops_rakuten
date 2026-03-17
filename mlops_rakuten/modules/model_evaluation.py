@@ -14,7 +14,7 @@ from sklearn.metrics import (
 )
 
 from mlops_rakuten.config.entities import ModelEvaluationConfig
-from mlops_rakuten.utils import create_directories
+from mlops_rakuten.utils.utils import create_directories
 import os
 import mlflow
 import traceback

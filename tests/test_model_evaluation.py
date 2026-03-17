@@ -7,7 +7,7 @@ from sklearn.linear_model import LogisticRegression
 
 from mlops_rakuten.config.entities import ModelEvaluationConfig
 from mlops_rakuten.modules.model_evaluation import ModelEvaluation
-from mlops_rakuten.utils import create_directories
+from mlops_rakuten.utils.utils import create_directories
 
 
 def test_model_evaluation_computes_and_saves_metrics(tmp_path):

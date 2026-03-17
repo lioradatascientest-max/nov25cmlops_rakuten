@@ -4,7 +4,7 @@ from loguru import logger
 import pandas as pd
 
 from mlops_rakuten.config.entities import DataPreprocessingConfig
-from mlops_rakuten.utils import create_directories
+from mlops_rakuten.utils.utils import create_directories
 
 
 class DataPreprocessing:

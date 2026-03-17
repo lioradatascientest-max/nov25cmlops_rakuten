@@ -4,7 +4,7 @@ from loguru import logger
 import pandas as pd
 
 from mlops_rakuten.config.entities import DataIngestionConfig
-from mlops_rakuten.utils import check_required_data_files, create_directories
+from mlops_rakuten.utils.utils import check_required_data_files, create_directories
 
 
 class DataIngestion:

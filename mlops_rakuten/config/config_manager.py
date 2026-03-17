@@ -24,7 +24,7 @@ from mlops_rakuten.config.entities import (
     ModelTrainerConfig,
     PredictionConfig,
 )
-from mlops_rakuten.utils import create_directories
+from mlops_rakuten.utils.utils import create_directories
 
 
 class ConfigurationManager:

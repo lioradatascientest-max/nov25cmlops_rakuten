@@ -9,7 +9,7 @@ import pandas as pd
 import mlflow
 
 from mlops_rakuten.config.entities import PredictionConfig
-from mlops_rakuten.utils import check_required_data_files
+from mlops_rakuten.utils.utils import check_required_data_files
 
 
 class Prediction:
