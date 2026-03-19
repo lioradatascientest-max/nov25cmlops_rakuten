@@ -105,7 +105,10 @@ with DAG(
         ],
         docker_url="unix://var/run/docker.sock",
         network_mode=DOCKER_NETWORK,
-        environment=SHARED_ENV,
+        environment={
+            **SHARED_ENV,
+            "GIT_SSH_COMMAND": "ssh -i /root/.ssh/id_github -o StrictHostKeyChecking=no -o IdentitiesOnly=yes",
+        },
         mounts=SHARED_MOUNTS + [APP_MOUNT, SSH_MOUNT],
         mount_tmp_dir=False,
         auto_remove="success",
