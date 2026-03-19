@@ -231,6 +231,11 @@ api-reload:
 docker-build:
 	$(COMPOSE_CMD) build
 
+## Build airflow initialisation (one time before first docker-up-airflow)
+.PHONY: docker-build-airflow
+docker-build-airflow:
+	$(COMPOSE_CMD) --profile airflow build airflow-init
+
 ## Start stack — mode CLI subprocess (sans dvc/git runner)
 .PHONY: docker-up-cli
 docker-up-cli:
@@ -240,6 +245,11 @@ docker-up-cli:
 .PHONY: docker-up-docker
 docker-up-docker:
 	EXECUTION_MODE=docker $(COMPOSE_CMD) --profile docker up -d --build
+
+## Start stack — mode Airflow (avec CeleryExecutor, nécessite docker-up-docker)
+.PHONY: docker-up-airflow
+docker-up-airflow:
+	EXECUTION_MODE=docker $(COMPOSE_CMD) --profile airflow up -d --build
 
 ## Start stack — défaut (EXECUTION_MODE depuis .env, sans profil)
 .PHONY: docker-up
@@ -287,7 +297,15 @@ docker-mode:
 .PHONY: mflow-ui
 mlflow-ui:
 	open https://dagshub.com/shiff-oumi/nov25cmlops_rakuten_dag.mlflow \
-	  2>/dev/null || xdg-open https://dagshub.com/shiff-oumi/nov25cmlops_rakuten_dag.mlflow		
+	  2>/dev/null || xdg-open https://dagshub.com/shiff-oumi/nov25cmlops_rakuten_dag.mlflow	
+
+#################################################################################
+# Airflow UI
+#################################################################################
+.PHONY: airflow-ui
+airflow-ui:
+	open http://localhost:8080 \
+	  2>/dev/null || xdg-open http://localhost:8080
 
 #################################################################################
 # QUICK SMOKE TESTS

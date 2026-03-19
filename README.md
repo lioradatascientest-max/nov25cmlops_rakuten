@@ -486,10 +486,12 @@ Après évaluation
 ### Configuration DVC remote
 
 ```bash
-dvc remote add origin https://dagshub.com/shiff-oumi/nov25cmlops_rakuten_dag.dvc
-dvc remote modify origin --local auth basic
-dvc remote modify origin --local user shiff-oumi
-dvc remote modify origin --local password <token_dagshub>
+dvc remote add origin s3://dvc
+dvc remote add origin https://dagshub.com/shiff-oumi/nov25cmlops_rakuten_dag.s3
+dvc remote modify origin --local access_key_id your_token
+dvc remote modify origin --local secret_access_key your_token
+
+dvc remote default origin
 
 dvc push   # → DagsHub S3
 dvc pull   # ← DagsHub S3
