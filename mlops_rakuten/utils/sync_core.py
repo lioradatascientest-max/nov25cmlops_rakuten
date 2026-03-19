@@ -107,7 +107,7 @@ def sync_git_dvc(
                 logger.info("[Sync] git push")
                 try:
                     branch = run_git("git rev-parse --abbrev-ref HEAD").strip()
-                    run_git(f"git push origin {branch}")
+                    run_git(f"git push myfork {branch}")
                     results["git_operations"].append({
                         "operation": "push",
                         "branch": branch,
