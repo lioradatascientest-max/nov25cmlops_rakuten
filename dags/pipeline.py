@@ -4,7 +4,7 @@ Orchestre ingest → train → validate via DockerOperator (socket Docker).
 
 Flow démo :
   1. Déposer manuellement un CSV dans data/uploads/
-  2. Déclencher le DAG manuellement depuis l'UI Airflow ▶️
+  2. Déclencher le DAG manuellement depuis l'UI Airflow 
   3. ingest   → ingère tous les CSV présents dans data/uploads/
   4. train    → dvc repro + sync DagsHub/MLflow
   5. validate → vérifie que le modèle est chargeable depuis MLflow @production
@@ -160,7 +160,52 @@ with DAG(
         tty=False,
     )
 
+    drift_monitor = DockerOperator(
+    task_id="drift_monitor",
+    image="nov25cmlops_rakuten-gateway:latest",
+    command=[
+        "python", "-c",
+        """
+import os
+from pathlib import Path
+from mlops_rakuten.monitoring.drift_report import run_drift_report
+ 
+run_drift_report(
+    reference_path=Path('/app/data/interim/rakuten_train.csv'),
+    uploads_dir=Path('/app/data/uploads'),
+    seeds_dir=Path('/app/data/raw/rakuten/seeds'),
+    report_output_path=Path('/app/reports/drift/drift_report.html'),
+    mlflow_tracking_uri=os.getenv('MLFLOW_TRACKING_URI'),
+)
+        """
+    ],
+    docker_url="unix://var/run/docker.sock",
+    network_mode="rakuten-net",
+    environment={
+        "EXECUTION_MODE": "docker",
+        "DAGSHUB_USER":             "{{ var.value.DAGSHUB_USER }}",
+        "DAGSHUB_REPO":             "{{ var.value.DAGSHUB_REPO }}",
+        "DAGSHUB_TOKEN":            "{{ var.value.DAGSHUB_TOKEN }}",
+        "MLFLOW_TRACKING_URI":      "{{ var.value.MLFLOW_TRACKING_URI }}",
+        "MLFLOW_TRACKING_USERNAME": "{{ var.value.MLFLOW_TRACKING_USERNAME }}",
+    },
+    mounts=[
+        # Accès au repo complet (data/, reports/, etc.)
+        Mount(
+            source="/home/shiff/datascientest/nov25cmlops_rakuten",
+            target="/app",
+            type="bind",
+        ),
+        Mount(source="rakuten_reports", target="/app/reports", type="volume"),
+        Mount(source="rakuten_logs",    target="/app/logs",    type="volume"),
+    ],
+    mount_tmp_dir=False,
+    auto_remove="success",
+    # Non bloquant — le pipeline continue même si drift échoue
+    trigger_rule="all_done",
+)
+
     # -----------------------------------------------------------------------
     # Dépendances
     # -----------------------------------------------------------------------
-    ingest >> train >> validate
+    ingest >> train >> validate >> drift_monitor

@@ -3,7 +3,7 @@
 # Trois modes d'exécution :
 #   make docker-up-cli     → EXECUTION_MODE=cli    (sans runners, sans airflow)
 #   make docker-up-docker  → EXECUTION_MODE=docker (avec dvc/git runners, sans airflow)
-#   make docker-up-airflow → EXECUTION_MODE=docker (avec airflow CeleryExecutor)
+#   make docker-up-airflow → EXECUTION_MODE=cli (avec airflow CeleryExecutor)
 
 # ============================================================================
 # Airflow — configuration commune 
@@ -68,6 +68,8 @@ services:
       api-ingest:
         condition: service_healthy
       api-train:
+        condition: service_healthy
+      api-monitor:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -175,6 +177,38 @@ services:
       - EXECUTION_MODE=${EXECUTION_MODE:-docker}
       - DAGSHUB_USER=${DAGSHUB_USER}
       - DAGSHUB_REPO=${DAGSHUB_REPO}
+      - DAGSHUB_TOKEN=${DAGSHUB_TOKEN}
+    env_file: .env
+
+    # ============================================================================
+  # Evidently - drift monitoring - Toujours présent
+  # ============================================================================
+  api-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rakuten-monitor
+    command: ["uvicorn", "mlops_rakuten.services.monitor_app:app", "--host", "0.0.0.0", "--port", "8000"]
+    volumes:
+      - .:/app                          # accès à data/interim, data/uploads, data/raw
+      - rakuten_reports:/app/reports    # rapport HTML partagé avec Streamlit
+      - rakuten_logs:/app/logs
+      - rakuten_models:/app/models
+    networks: [rakuten-net]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    environment:
+      - REFERENCE_CSV=/app/data/interim/rakuten_train.csv
+      - UPLOADS_DIR=/app/data/uploads
+      - SEEDS_DIR=/app/data/raw/rakuten/seeds
+      - MODELS_DIR=/app/models
+      - REPORT_PATH=/app/reports/drift/drift_report.html
+      - MLFLOW_TRACKING_URI=${MLFLOW_TRACKING_URI}
+      - MLFLOW_TRACKING_USERNAME=${MLFLOW_TRACKING_USERNAME}
       - DAGSHUB_TOKEN=${DAGSHUB_TOKEN}
     env_file: .env
 
@@ -407,6 +441,7 @@ services:
       timeout: 10s
       retries: 5
     restart: unless-stopped
+
 
 # ============================================================================
 # Volumes

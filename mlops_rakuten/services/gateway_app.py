@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, status
+from fastapi.responses import HTMLResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from loguru import logger
 import time
@@ -21,6 +22,7 @@ app = FastAPI(title="Rakuten Gateway", version="1.0.0")
 PREDICT_URL = "http://api-predict:8000"
 INGEST_URL = "http://api-ingest:8000"
 TRAIN_URL = "http://api-train:8000"
+MONITOR_URL = "http://api-monitor:8000"
 
 
 @app.get("/health")
@@ -176,3 +178,33 @@ async def proxy_predict(payload: PredictionRequest, _=Depends(require_user)) -> 
         raise HTTPException(status_code=r.status_code, detail=r.text)
 
     return r.json()
+
+
+@app.post("/drift")
+async def proxy_drift(_=Depends(require_admin)) -> Any:
+    """
+    Lance le rapport Evidently — compare rakuten_train.csv vs dernier batch ingéré.
+    
+    - Détecte automatiquement le dernier batch (uploads/ prioritaire sur seeds/)
+    - Génère le rapport HTML Evidently
+    - Log les métriques dans MLflow
+    """
+    async with httpx.AsyncClient(timeout=300) as client:
+        r = await client.post(f"{MONITOR_URL}/drift")
+    if r.status_code >= 400:
+        raise HTTPException(status_code=r.status_code, detail=r.text)
+    return r.json()
+ 
+ 
+@app.get("/drift/report")
+async def proxy_drift_report(_=Depends(require_user)) -> Any:
+    """
+    Retourne le rapport HTML Evidently — à afficher dans Streamlit.
+    Nécessite d'avoir lancé POST /drift au préalable.
+    """
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.get(f"{MONITOR_URL}/drift/report")
+    if r.status_code >= 400:
+        raise HTTPException(status_code=r.status_code, detail=r.text)
+    return HTMLResponse(content=r.text)
+ 
