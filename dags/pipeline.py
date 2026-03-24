@@ -1,13 +1,14 @@
 """
 DAG Rakuten MLOps Pipeline
-Orchestre ingest → train → validate via DockerOperator (socket Docker).
+Orchestre ingest → train → validate → drift_monitor via DockerOperator.
 
 Flow démo :
   1. Déposer manuellement un CSV dans data/uploads/
-  2. Déclencher le DAG manuellement depuis l'UI Airflow 
-  3. ingest   → ingère tous les CSV présents dans data/uploads/
-  4. train    → dvc repro + sync DagsHub/MLflow
-  5. validate → vérifie que le modèle est chargeable depuis MLflow @production
+  2. Déclencher le DAG manuellement depuis l'UI Airflow
+  3. ingest        → ingère tous les CSV présents dans data/uploads/
+  4. train         → dvc repro + sync DagsHub/MLflow
+  5. validate      → vérifie que le modèle @production est opérationnel
+  6. drift_monitor → rapport Evidently référence vs dernier batch
 
 En prod : remplacer le trigger manuel par un FileSensor sur data/uploads/
 """
@@ -32,24 +33,22 @@ DEFAULT_ARGS = {
 
 DOCKER_NETWORK = "nov25cmlops_rakuten_rakuten-net"
 
-# Variables injectées via env_file: .env dans le service airflow du docker-compose
 SHARED_ENV = {
     "EXECUTION_MODE": "cli",
-    "DAGSHUB_USER": os.environ.get("DAGSHUB_USER", ""),
-    "DAGSHUB_REPO": os.environ.get("DAGSHUB_REPO", ""),
-    "DAGSHUB_TOKEN": os.environ.get("DAGSHUB_TOKEN", ""),
+    "DAGSHUB_USER":    os.environ.get("DAGSHUB_USER", ""),
+    "DAGSHUB_REPO":    os.environ.get("DAGSHUB_REPO", ""),
+    "DAGSHUB_TOKEN":   os.environ.get("DAGSHUB_TOKEN", ""),
     "GIT_AUTHOR_NAME": os.environ.get("GIT_AUTHOR_NAME", ""),
-    "GIT_AUTHOR_EMAIL": os.environ.get("GIT_AUTHOR_EMAIL", ""),
-    "GITHUB_USER": os.environ.get("GITHUB_USER", ""),
+    "GIT_AUTHOR_EMAIL":os.environ.get("GIT_AUTHOR_EMAIL", ""),
+    "GITHUB_USER":     os.environ.get("GITHUB_USER", ""),
 }
 
 MLFLOW_ENV = {
-    "MLFLOW_TRACKING_URI": os.environ.get("MLFLOW_TRACKING_URI", ""),
+    "MLFLOW_TRACKING_URI":      os.environ.get("MLFLOW_TRACKING_URI", ""),
     "MLFLOW_TRACKING_USERNAME": os.environ.get("DAGSHUB_USER", ""),
     "MLFLOW_TRACKING_PASSWORD": os.environ.get("DAGSHUB_TOKEN", ""),
 }
 
-# Volumes nommés Docker — cohérents avec le docker-compose
 SHARED_MOUNTS = [
     Mount(source="rakuten_dvc_cache", target="/app/.dvc/cache", type="volume"),
     Mount(source="rakuten_models",    target="/app/models",     type="volume"),
@@ -57,14 +56,12 @@ SHARED_MOUNTS = [
     Mount(source="rakuten_reports",   target="/app/reports",    type="volume"),
 ]
 
-# Bind mount sur le code source — accès à data/uploads/ et au code
 APP_MOUNT = Mount(
     source="/home/shiff/datascientest/nov25cmlops_rakuten",
     target="/app",
     type="bind",
 )
 
-# Clé SSH — entrypoint.sh cherche /root/.ssh/id_github
 SSH_MOUNT = Mount(
     source="/home/shiff/.ssh",
     target="/root/.ssh",
@@ -77,7 +74,7 @@ SSH_MOUNT = Mount(
 
 with DAG(
     dag_id="rakuten_ml_pipeline",
-    description="Pipeline ML Rakuten : ingest → train → validate",
+    description="Pipeline ML Rakuten : ingest → train → validate → drift",
     default_args=DEFAULT_ARGS,
     start_date=datetime(2025, 1, 1),
     schedule_interval=None,  # déclenchement manuel pour la démo
@@ -87,8 +84,6 @@ with DAG(
 
     # -----------------------------------------------------------------------
     # STEP 1 — Ingest
-    # Ingère tous les CSV présents dans data/uploads/
-    # L'entrypoint.sh configure SSH + Git + DVC avant d'exécuter la commande
     # -----------------------------------------------------------------------
     ingest = DockerOperator(
         task_id="ingest",
@@ -114,8 +109,6 @@ with DAG(
 
     # -----------------------------------------------------------------------
     # STEP 2 — Train
-    # dvc pull → dvc repro → dvc push → sync DagsHub/MLflow
-    # L'entrypoint.sh configure SSH + Git + DVC avant d'exécuter la commande
     # -----------------------------------------------------------------------
     train = DockerOperator(
         task_id="train",
@@ -124,10 +117,7 @@ with DAG(
         command=["python", "-m", "mlops_rakuten.main", "train"],
         docker_url="unix://var/run/docker.sock",
         network_mode=DOCKER_NETWORK,
-        environment={
-            **SHARED_ENV,
-            **MLFLOW_ENV,
-        },
+        environment={**SHARED_ENV, **MLFLOW_ENV},
         mounts=SHARED_MOUNTS + [APP_MOUNT, SSH_MOUNT],
         mount_tmp_dir=False,
         auto_remove="success",
@@ -136,9 +126,6 @@ with DAG(
 
     # -----------------------------------------------------------------------
     # STEP 3 — Validate
-    # Charge le modèle @production depuis MLflow et fait une prédiction test
-    # Valide que le modèle est opérationnel après le train
-    # En prod : comparer les métriques f1 vs seuil minimum
     # -----------------------------------------------------------------------
     validate = DockerOperator(
         task_id="validate",
@@ -150,60 +137,47 @@ with DAG(
         ],
         docker_url="unix://var/run/docker.sock",
         network_mode=DOCKER_NETWORK,
-        environment={
-            **SHARED_ENV,
-            **MLFLOW_ENV,
-        },
+        environment={**SHARED_ENV, **MLFLOW_ENV},
         mounts=SHARED_MOUNTS + [APP_MOUNT],
         mount_tmp_dir=False,
         auto_remove="success",
         tty=False,
     )
 
+    # -----------------------------------------------------------------------
+    # STEP 4 — Drift Monitor
+    # Non bloquant — tourne même si validate échoue
+    # Lit mlflow_run_metadata.json pour se rattacher au bon run MLflow
+    # -----------------------------------------------------------------------
     drift_monitor = DockerOperator(
-    task_id="drift_monitor",
-    image="nov25cmlops_rakuten-gateway:latest",
-    command=[
-        "python", "-c",
-        """
-import os
-from pathlib import Path
-from mlops_rakuten.monitoring.drift_report import run_drift_report
- 
-run_drift_report(
-    reference_path=Path('/app/data/interim/rakuten_train.csv'),
-    uploads_dir=Path('/app/data/uploads'),
-    seeds_dir=Path('/app/data/raw/rakuten/seeds'),
-    report_output_path=Path('/app/reports/drift/drift_report.html'),
-    mlflow_tracking_uri=os.getenv('MLFLOW_TRACKING_URI'),
-)
-        """
-    ],
-    docker_url="unix://var/run/docker.sock",
-    network_mode="rakuten-net",
-    environment={
-        "EXECUTION_MODE": "docker",
-        "DAGSHUB_USER":             "{{ var.value.DAGSHUB_USER }}",
-        "DAGSHUB_REPO":             "{{ var.value.DAGSHUB_REPO }}",
-        "DAGSHUB_TOKEN":            "{{ var.value.DAGSHUB_TOKEN }}",
-        "MLFLOW_TRACKING_URI":      "{{ var.value.MLFLOW_TRACKING_URI }}",
-        "MLFLOW_TRACKING_USERNAME": "{{ var.value.MLFLOW_TRACKING_USERNAME }}",
-    },
-    mounts=[
-        # Accès au repo complet (data/, reports/, etc.)
-        Mount(
-            source="/home/shiff/datascientest/nov25cmlops_rakuten",
-            target="/app",
-            type="bind",
-        ),
-        Mount(source="rakuten_reports", target="/app/reports", type="volume"),
-        Mount(source="rakuten_logs",    target="/app/logs",    type="volume"),
-    ],
-    mount_tmp_dir=False,
-    auto_remove="success",
-    # Non bloquant — le pipeline continue même si drift échoue
-    trigger_rule="all_done",
-)
+        task_id="drift_monitor",
+        image="nov25cmlops_rakuten-api-ingest:latest",  # même image = même code
+        entrypoint="/entrypoint.sh",
+        command=[
+            "python", "-c",
+            (
+                "import os; from pathlib import Path; "
+                "from mlops_rakuten.monitoring.drift_report import run_drift_report; "
+                "run_drift_report("
+                "    reference_path=Path('/app/data/interim/rakuten_train.csv'),"
+                "    uploads_dir=Path('/app/data/uploads'),"
+                "    seeds_dir=Path('/app/data/raw/rakuten/seeds'),"
+                "    report_output_path=Path('/app/reports/drift/drift_report.html'),"
+                "    models_dir=Path('/app/models'),"
+                "    mlflow_tracking_uri=os.getenv('MLFLOW_TRACKING_URI'),"
+                ")"
+            )
+        ],
+        docker_url="unix://var/run/docker.sock",
+        network_mode=DOCKER_NETWORK,
+        environment={**SHARED_ENV, **MLFLOW_ENV},
+        mounts=SHARED_MOUNTS + [APP_MOUNT],
+        mount_tmp_dir=False,
+        auto_remove="success",
+        tty=False,
+        # Non bloquant — drift tourne même si validate échoue
+        trigger_rule="all_done",
+    )
 
     # -----------------------------------------------------------------------
     # Dépendances

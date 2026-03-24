@@ -222,6 +222,19 @@ api-reload:
 		-H "Authorization: Bearer $(TOKEN)" \
 		| python -m json.tool
 
+
+# curl : POST /drift - compare les distribtions entre le dernier batch ingéré et les données d'entraînement 
+.PHONY: api-drift
+api-drift:
+	@echo "POST $(API_URL)/drift"
+	@curl -s -k -X POST "$(API_URL)/drift" \
+		-H "Authorization: Bearer $(TOKEN)" \
+		| python -m json.tool
+
+.PHONY: api-drift-report
+api-drift-report:
+	explorer.exe reports/drift/drift_report.html
+
 #################################################################################
 # DOCKER COMPOSE
 #################################################################################

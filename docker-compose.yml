@@ -203,7 +203,7 @@ services:
       retries: 5
     environment:
       - REFERENCE_CSV=/app/data/interim/rakuten_train.csv
-      - UPLOADS_DIR=/app/data/uploads
+      - UPLOADS_DIR=/app/data/raw/uploads
       - SEEDS_DIR=/app/data/raw/rakuten/seeds
       - MODELS_DIR=/app/models
       - REPORT_PATH=/app/reports/drift/drift_report.html

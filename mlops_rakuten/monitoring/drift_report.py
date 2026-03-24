@@ -13,6 +13,7 @@ import json
 import logging
 import os
 from pathlib import Path
+from loguru import logger
 
 import mlflow
 import pandas as pd
@@ -21,13 +22,15 @@ import pandas as pd
 try:
     from evidently import ColumnMapping
     from evidently.metric_preset import DataDriftPreset, TargetDriftPreset
+    from evidently.metrics import ColumnDistributionMetric
+    
     from evidently.report import Report
 except ImportError:
     from evidently.pipeline.column_mapping import ColumnMapping
     from evidently.metric_preset import DataDriftPreset, TargetDriftPreset
+    from evidently.metrics import ColumnDistributionMetric
     from evidently.report import Report
 
-logger = logging.getLogger(__name__)
 
 COLUMN_MAPPING = ColumnMapping(
     target="prdtypecode",
@@ -58,6 +61,13 @@ def get_latest_batch(uploads_dir: Path, seeds_dir: Path) -> Path:
         f"Aucun batch trouvé dans {uploads_dir} ni {seeds_dir}"
     )
 
+def load_category_mapping(categories_path: Path) -> dict:
+    """Lit data/raw/product_categories.csv → {code: nom}"""
+    if not categories_path.exists():
+        logger.warning(f"product_categories.csv introuvable : {categories_path}")
+        return {}
+    df = pd.read_csv(categories_path)
+    return dict(zip(df["prdtypecode"], df["category_name"]))
 
 def load_run_metadata(models_dir: Path) -> dict:
     """
@@ -79,10 +89,17 @@ def load_run_metadata(models_dir: Path) -> dict:
     return data
 
 
-def load_csv(path: Path) -> pd.DataFrame:
+def load_csv(path: Path, category_mapping: dict = {}) -> pd.DataFrame:
     df = pd.read_csv(path)
     cols = [c for c in FEATURE_COLS if c in df.columns]
-    return df[cols].dropna(subset=["designation"])
+    df = df[cols].dropna(subset=["designation"])
+    if "prdtypecode" in df.columns and category_mapping:
+        df["prdtypecode"] = (
+            df["prdtypecode"]
+            .map(category_mapping)
+            .fillna(df["prdtypecode"].astype(str))
+        )
+    return df
 
 
 def run_drift_report(
@@ -105,20 +122,23 @@ def run_drift_report(
     """
     current_path = get_latest_batch(uploads_dir, seeds_dir)
 
-    logger.info("Référence : %s", reference_path.name)
-    reference = load_csv(reference_path)
+    categories_path = Path("/app/data/raw/product_categories.csv")
+    category_mapping = load_category_mapping(categories_path)
 
-    logger.info("Courant   : %s", current_path.name)
-    current = load_csv(current_path)
+    reference = load_csv(reference_path, category_mapping)
+    logger.info(f"Référence : {reference_path.name}")
+
+    current = load_csv(current_path, category_mapping)
+    logger.info(f"Courant : {current_path.name}")
 
     logger.info(
-        "Comparaison : %d lignes référence vs %d lignes courant",
-        len(reference), len(current),
+        f"Comparaison : {len(reference)} lignes référence vs {len(current)} lignes courant"
     )
 
     report = Report(metrics=[
         DataDriftPreset(),
         TargetDriftPreset(),
+        ColumnDistributionMetric(column_name="prdtypecode"),
     ])
     report.run(
         reference_data=reference,
@@ -192,12 +212,16 @@ def run_drift_report(
 
 def _extract_metrics(report_dict: dict) -> dict:
     metrics = {}
-    for metric in report_dict.get("metrics", []):
-        result = metric.get("result", {})
-        if "share_of_drifted_columns" in result:
-            metrics["drift_share"] = result["share_of_drifted_columns"]
-        if "number_of_drifted_columns" in result:
-            metrics["drift_count"] = float(result["number_of_drifted_columns"])
-        if "dataset_drift" in result:
-            metrics["dataset_drift"] = float(result["dataset_drift"])
+    metric_list = report_dict.get("metrics", [])
+    
+    if not metric_list:
+        return metrics
+    
+    # Metric 0 = DataDriftPreset — c'est celle qui a les bonnes valeurs dataset
+    result = metric_list[0].get("result", {})
+    
+    metrics["drift_share"]  = result.get("share_of_drifted_columns", 0.0)
+    metrics["drift_count"]  = float(result.get("number_of_drifted_columns", 0))
+    metrics["dataset_drift"] = float(result.get("dataset_drift", 0))
+    
     return metrics

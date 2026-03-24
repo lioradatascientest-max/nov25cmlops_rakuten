@@ -20,6 +20,7 @@ Classification de types de produits pour Rakuten France
 - [Lancer l'application avec Docker](#lancer-lapplication-avec-docker)
 - [Orchestration batch avec Airflow](#orchestration-batch-avec-airflow)
 - [Monitoring](#monitoring)
+- [Drift Monitoring — Evidently](#drift-monitoring--evidently)
 - [Tests](#tests)
 - [Commandes Makefile](#commandes-makefile)
 
@@ -53,23 +54,23 @@ Le projet suit une architecture microservices conteneurisée. Le même pipeline 
 └────────────────────────────┬────────────────────────────────────────┘
                              │ HTTP interne
                              ▼
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                       API GATEWAY (FastAPI)                                            │
-│  • Authentification OAuth2 / Bearer Token                                              │
-│  • Routage vers les services internes                                                  │
-└──────┬──────────────────┬──────────────────────┬──────────────────┬────────────────────┘
-       │                  │                      │                  │
-       ▼                  ▼                      ▼                  ▼
-┌────────────┐   ┌────────────────┐   ┌──────────────────┐   ┌──────────────────┐
-│  Ingest    │   │  Train Service │   │  Predict Service │   │  Init Service    │
-│  Service   │   │                │   │                  │   │                  │
-│ (FastAPI)  │   │  • Pipeline    │   │  • Chargement    │   │  • Init dataset  │
-│            │   │    complète    │   │    modèle MLflow │   │    seed          │
-│ • Merge    │   │  • MLflow      │   │  • Inférence     │   │  • Reset état    │
-│   datasets │   │    tracking    │   │  • Top-K résult. │   │    pipeline      │
-└─────┬──────┘   └───────┬────────┘   └──────────────────┘   └────────┬─────────┘
-      │                  │                                            │
-      └──────────────────┼────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                       API GATEWAY (FastAPI)                                                        │
+│  • Authentification OAuth2 / Bearer Token                                                          │
+│  • Routage vers les services internes                                                              │
+└──────┬──────────────────┬──────────────────────┬──────────────────┬──────────────────┬─────────────┘
+       │                  │                      │                  │                  │
+       ▼                  ▼                      ▼                  ▼                  ▼
+┌────────────┐   ┌────────────────┐   ┌──────────────────┐   ┌──────────────┐   ┌──────────────────┐
+│  Ingest    │   │  Train Service │   │  Predict Service │   │  Init        │   │  Monitor Service │
+│  Service   │   │                │   │                  │   │  Service     │   │                  │
+│ (FastAPI)  │   │  • Pipeline    │   │  • Chargement    │   │              │   │  • Evidently     │
+│            │   │    complète    │   │    modèle MLflow │   │              │   │  • Drift report  │
+│ • Merge    │   │  • MLflow      │   │  • Inférence     │   │              │   │  • MLflow        │
+│   datasets │   │    tracking    │   │  • Top-K résult. │   │              │   │                  │
+└─────┬──────┘   └───────┬────────┘   └──────────────────┘   └──────┬───────┘   └──────────────────┘
+      │                  │                                          │
+      └──────────────────┼──────────────────────────────────────────┘
                          │
               ┌──────────┴──────────┐
               │                     │
@@ -269,6 +270,7 @@ a3f1c2e  Airflow:train          — model v26, f1_macro=0.7750  ← automatique 
 │
 └── mlops_rakuten/
     ├── main.py                <- Point d'entrée CLI
+    ├── monitoring/            ← Logique Evidently
     ├── services/              <- API FastAPI (gateway, ingest, train, predict)
     ├── auth/                  <- OAuth2
     ├── config/                <- config.yml, entités, constantes
@@ -512,9 +514,10 @@ dvc pull   # ← DagsHub S3
 | `api-predict` | Inférence                               | interne | toujours   |
 | `prometheus`  | Métriques                               | 9090    | toujours   |
 | `grafana`     | Dashboards                              | 3000    | toujours   |
+| `api-monitor` | Drift monitoring Evidently              | interne | toujours   |
 | `dvc-runner`  | DVC isolé (docker-in-docker)            | interne | `docker`   |
 | `git-runner`  | Git isolé (docker-in-docker)            | interne | `docker`   |
-| `airflow`     | Orchestration batch                     | 8082    | `batch`    |
+| `airflow`     | Orchestration batch                     | 8080   | `airflow`    |
 
 ### SSH et commits automatiques
 
@@ -564,7 +567,7 @@ make swagger   # → https://localhost/docs
 
 ```bash
 make docker-up-batch
-make airflow-ui    # → http://localhost:8082  (admin/admin)
+make airflow-ui    # → http://localhost:8080  (admin/admin)
 ```
 
 ### DAG — rakuten_batch_pipeline
@@ -577,7 +580,35 @@ check_batch
     └── CSV absent → no_batch (skip)
 ```
 
-Le DAG réutilise `mlops_rakuten.utils.cli` directement — même transport subprocess que le Mode CLI
+Le DAG réutilise `mlops_rakuten.utils.cli` directement — même transport subprocess que le Mode CLI.
+
+---
+
+### DAG drift_monitor
+
+Le drift monitoring est intégré comme étape finale du pipeline principal :
+
+```
+ingest >> train >> predict >> drift_monitor
+```
+
+La tâche `drift_monitor` utilise un `DockerOperator` qui appelle directement
+`mlops_rakuten.monitoring.drift_report` — même logique que le endpoint `POST /drift`.
+
+```python
+drift_monitor = DockerOperator(
+    task_id="drift_monitor",
+    image="nov25cmlops_rakuten-gateway:latest",
+    trigger_rule="all_done",   # non bloquant — s'exécute même si predict échoue
+    ...
+)
+
+ingest >> train >> predict >> drift_monitor
+```
+
+Le paramètre `trigger_rule="all_done"` garantit que le monitoring tourne
+toujours en fin de pipeline, même en cas d'échec partiel des étapes précédentes.
+
 
 ### Commandes Airflow
 
@@ -592,9 +623,90 @@ make airflow-ui               # ouvrir l'interface
 
 ## Monitoring
 
+Le projet intègre trois couches de monitoring complémentaires :
+
+```
+MLflow + Evaluation   → performance modèle (accuracy, f1, classification report)
+Evidently             → drift données (distribution, qualité, dérive texte)
+Prometheus / Grafana  → métriques infra (latence HTTP, CPU, requêtes nginx)
+```
+
 - **Prometheus** : métriques système et applicatives → [http://localhost:9090](http://localhost:9090)
 - **Grafana** : dashboards → [http://localhost:3000](http://localhost:3000) (admin/admin)
 
+---
+
+### Drift Monitoring — Evidently
+
+Le service `api-monitor` expose un endpoint de drift monitoring basé sur [Evidently](https://www.evidentlyai.com/).
+Il compare le dataset de référence (`rakuten_train.csv`, 74k lignes) contre le dernier batch ingéré.
+
+#### Architecture
+
+```
+POST /drift (via Gateway)
+    ↓
+api-monitor
+    ↓ détecte automatiquement le dernier batch
+    ├── uploads/rakuten_batch_*.csv  (prioritaire — ingest récent)
+    └── raw/rakuten/seeds/rakuten_batch_*.csv  (fallback)
+    ↓
+drift_report.py (Evidently)
+    ├── DataDriftPreset()              → dérive distribution features
+    ├── TargetDriftPreset()            → dérive distribution catégories
+    └── ColumnDistributionMetric()     → distribution par catégorie Rakuten
+    ↓
+    ├── rapport HTML → reports/drift/drift_report.html (volume rakuten_reports)
+    └── métriques   → MLflow experiment "train_rakuten_model_mlflow"
+                      tags: train_run_id, model_version, current_batch
+```
+
+#### Métriques exposées
+
+| Métrique | Description | Type |
+|---|---|---|
+| `drift_share` | Part de colonnes avec drift détecté (0.0 → 1.0) | float |
+| `drift_count` | Nombre de colonnes driftées | float |
+| `dataset_drift` | Drift global détecté (0 ou 1) | float |
+| `current_batch` | Nom du batch comparé | tag MLflow |
+| `train_run_id` | Run MLflow du dernier entraînement | tag MLflow |
+
+#### Endpoints
+
+| Méthode | Endpoint | Rôle requis | Description |
+|---|---|---|---|
+| `POST` | `/drift` | admin | Lance le rapport Evidently |
+| `GET` | `/drift/report` | user | Retourne le rapport HTML |
+
+#### Mapping des catégories
+
+Les codes `prdtypecode` sont traduits en noms lisibles pour le rapport :
+
+| Code | Catégorie |
+|---|---|
+| 10 | Livres |
+| 40 | Films |
+| 1140 | Jouets |
+| 1280 | Peluches |
+| 2705 | Livres jeunesse |
+| 2905 | Jeux vidéo |
+| ... | (voir `data/raw/product_categories.csv`) |
+
+Le mapping est chargé dynamiquement depuis `data/raw/product_categories.csv`.
+
+#### Intégration MLflow
+
+Le run drift est loggé dans le **même experiment** que l'entraînement, avec un tag `train_run_id` qui le lie au dernier run d'entraînement. Le rapport HTML est également archivé comme artifact MLflow sous `drift_reports/drift_report.html`.
+
+```
+DagsHub MLflow → train_rakuten_model_mlflow
+    ├── run: training        run_id=ea5512d...   ← entraînement
+    └── run: drift_monitoring                    ← drift
+          tags:
+            train_run_id  = ea5512d...
+            model_version = 39
+            current_batch = rakuten_batch_0008.csv
+```
 ---
 
 ## Tests
@@ -643,6 +755,8 @@ pytest tests/test_model_trainer.py      # module spécifique
 | `make api-train`                      | Lance l'entraînement           |
 | `make api-predict TEXT=<t> TOPK=<n>`  | Prédiction                     |
 | `make api-info`                       | Informations modèle actif      |
+| `make api-drift`                      | Lance le rapport Evidently     |
+| `make api-drift-report`               | Retourne le fichier HTML       |
 
 ### Airflow
 
@@ -651,7 +765,7 @@ pytest tests/test_model_trainer.py      # module spécifique
 | `make airflow-trigger`        | Déclenche le DAG manuellement      |
 | `make airflow-runs`           | Liste les derniers runs            |
 | `make airflow-set-batch N=3`  | Configure le prochain batch        |
-| `make airflow-ui`             | Ouvre http://localhost:8082        |
+| `make airflow-ui`             | Ouvre http://localhost:8080        |
 
 ### Local
 
