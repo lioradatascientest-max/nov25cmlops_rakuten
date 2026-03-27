@@ -97,8 +97,8 @@ stages:
     deps:
     - path: data/interim/rakuten_train.csv
       hash: md5
-      md5: 4cfcef31898927e8bde1511711a93ada
-      size: 5758597
+      md5: dfcb929e3862f855714af8cd33be8ae2
+      size: 5782684
     - path: mlops_rakuten/config/config.yml
       hash: md5
       md5: 85d4df6b2c00e6a114415230c06c702b
@@ -127,15 +127,15 @@ stages:
     outs:
     - path: data/interim/preprocessed_dataset.csv
       hash: md5
-      md5: d34eef90de9f96dc840219e7cdf82868
-      size: 5552437
+      md5: 6b9e4589892a9a4049401b62efa53c00
+      size: 5410533
   transform:
     cmd: python mlops_rakuten/pipelines/data_transformation.py
     deps:
     - path: data/interim/preprocessed_dataset.csv
       hash: md5
-      md5: d34eef90de9f96dc840219e7cdf82868
-      size: 5552437
+      md5: 6b9e4589892a9a4049401b62efa53c00
+      size: 5410533
     - path: mlops_rakuten/config/config.yml
       hash: md5
       md5: 85d4df6b2c00e6a114415230c06c702b
@@ -172,12 +172,12 @@ stages:
     outs:
     - path: data/processed/X_train_tfidf.npz
       hash: md5
-      md5: d739fd6eab258c728ffd6b6e16e34c13
-      size: 5899502
+      md5: a2cd2f36e882fcfac89b041a3b2c8f8e
+      size: 5760403
     - path: data/processed/X_val_tfidf.npz
       hash: md5
-      md5: 602684fb613a2039b840b830a4ce95b1
-      size: 1434303
+      md5: 44bbbe06a309b3e590d178133f2c4c5f
+      size: 1386346
     - path: data/processed/class_mapping.json
       hash: md5
       md5: 1e3fc6fa70ee1316c3a22acbd76af9d3
@@ -188,16 +188,16 @@ stages:
       size: 458
     - path: data/processed/tfidf_vectorizer.pkl
       hash: md5
-      md5: 1beedc7b336ad33428cc29adb8f8abe7
-      size: 778021
+      md5: acd0d9fac0d75c8bf1466ebc0d38f99f
+      size: 777692
     - path: data/processed/y_train.npy
       hash: md5
-      md5: 489d4a6681f4839095ba811a7d54e59a
-      size: 473528
+      md5: 955c8bcec549d7d6a62de8384b69b374
+      size: 461448
     - path: data/processed/y_val.npy
       hash: md5
-      md5: d5f828df4b93ca3602f26ede048770ba
-      size: 118480
+      md5: 6c266f9ac58b2e5e929406c296276f3d
+      size: 115464
   train:
     cmd: python mlops_rakuten/pipelines/model_trainer.py
     deps:
