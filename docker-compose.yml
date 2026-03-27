@@ -63,8 +63,8 @@ services:
     networks: [rakuten-net]
     restart: unless-stopped
     depends_on:
-      api-predict:
-        condition: service_healthy
+     # api-predict:
+      #  condition: service_healthy
       api-ingest:
         condition: service_healthy
       api-train:
