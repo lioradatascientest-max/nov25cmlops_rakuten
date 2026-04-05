@@ -1,0 +1,94 @@
+schema: '2.0'
+stages:
+  seed:
+    cmd: python mlops_rakuten/pipelines/data_seeding.py
+    deps:
+    - path: data/raw/product_categories.csv
+      hash: md5
+      md5: 1623c8de2d17e200fc3fa76ebebbbc4e
+      size: 631
+    - path: data/raw/rakuten/X_train_update.csv
+      hash: md5
+      md5: c936389910c88bb29bf2c438af3476df
+      size: 54129120
+    - path: data/raw/rakuten/Y_train_CVw08PX.csv
+      hash: md5
+      md5: 52d45c998ddc0c10f05987bb233ff5e7
+      size: 906705
+    - path: mlops_rakuten/config/config.yml
+      hash: md5
+      md5: 85d4df6b2c00e6a114415230c06c702b
+      size: 3145
+    - path: mlops_rakuten/main.py
+      hash: md5
+      md5: 633977e4fcdf08d26b6e5868916613b6
+      size: 5191
+    - path: mlops_rakuten/modules/data_seeding.py
+      hash: md5
+      md5: d0be90a9f9b08f7e597d26d35666a67e
+      size: 4772
+    - path: mlops_rakuten/pipelines/data_seeding.py
+      hash: md5
+      md5: b83b06f5a56b60966d627d3f5e6bf0db
+      size: 871
+    params:
+      mlops_rakuten/config/config.yml:
+        data_seeding:
+          x_train_filename: X_train_update.csv
+          y_train_filename: Y_train_CVw08PX.csv
+          output_full_dataset_filename: rakuten_dataset_full.csv
+          output_remainder_dataset_filename: rakuten_dataset_remainder.csv
+          output_dataset_filename: rakuten_train.csv
+          text_column: designation
+          target_column: prdtypecode
+          batch_size: 1000
+          n_batches: 10
+    outs:
+    - path: data/raw/rakuten/seeds/rakuten_batch_0001.csv
+      hash: md5
+      md5: e6c9cfef46850233ebcf781f4a9e1af8
+      size: 78518
+    - path: data/raw/rakuten/seeds/rakuten_batch_0002.csv
+      hash: md5
+      md5: d08c2ae328a72d2a481b613799256990
+      size: 79245
+    - path: data/raw/rakuten/seeds/rakuten_batch_0003.csv
+      hash: md5
+      md5: 23b564024a8bab4e332d50f983d08510
+      size: 75698
+    - path: data/raw/rakuten/seeds/rakuten_batch_0004.csv
+      hash: md5
+      md5: 5eb6441456e0ecfbcc1b34da2f3c363d
+      size: 78282
+    - path: data/raw/rakuten/seeds/rakuten_batch_0005.csv
+      hash: md5
+      md5: 10773f44a0d5bb7d54ee58b681c704d6
+      size: 76362
+    - path: data/raw/rakuten/seeds/rakuten_batch_0006.csv
+      hash: md5
+      md5: 64f6233bfdd6e55d6ccfd971b3ca1f6b
+      size: 76963
+    - path: data/raw/rakuten/seeds/rakuten_batch_0007.csv
+      hash: md5
+      md5: 318a076594c76f3de9f3d82cab129f9d
+      size: 78236
+    - path: data/raw/rakuten/seeds/rakuten_batch_0008.csv
+      hash: md5
+      md5: 118c64aa32e399f7cc8d3379f2c38c77
+      size: 78615
+    - path: data/raw/rakuten/seeds/rakuten_batch_0009.csv
+      hash: md5
+      md5: f60c5223494b30474ec888e733d86b2c
+      size: 78503
+    - path: data/raw/rakuten/seeds/rakuten_batch_0010.csv
+      hash: md5
+      md5: d7eaba592f4595001f89681d8fe3d5cb
+      size: 79210
+    - path: data/raw/rakuten/seeds/rakuten_dataset_full.csv
+      hash: md5
+      md5: e8ee50889f16cb234a2fbb684e2f3560
+      size: 6562076
+    - path: data/raw/rakuten/seeds/rakuten_dataset_remainder.csv
+      hash: md5
+      md5: dfcb929e3862f855714af8cd33be8ae2
+      size: 5782684
