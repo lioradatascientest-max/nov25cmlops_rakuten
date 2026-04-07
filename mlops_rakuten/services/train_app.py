@@ -4,6 +4,8 @@ from fastapi import FastAPI, HTTPException
 from loguru import logger
 import os
 
+from mlops_rakuten.monitoring.prometheus_metrics import configure_metrics
+
 EXECUTION_MODE = os.getenv("EXECUTION_MODE", "cli")
 
 if EXECUTION_MODE == "docker":
@@ -20,6 +22,7 @@ app = FastAPI(
     version="1.0.0",
     description=f"Mode d'exécution actuel : **{EXECUTION_MODE}**",
 )
+configure_metrics(app)
 
 
 @app.get("/health")

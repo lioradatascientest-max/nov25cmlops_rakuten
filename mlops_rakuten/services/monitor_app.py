@@ -14,9 +14,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
+from mlops_rakuten.monitoring.prometheus_metrics import configure_metrics
 from mlops_rakuten.monitoring.drift_report import run_drift_report
 
 app = FastAPI(title="Rakuten Monitor API", version="1.0.0")
+configure_metrics(app)
 
 # ============================================================================
 # Chemins (injectés via env ou valeurs par défaut)

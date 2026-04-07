@@ -7,6 +7,10 @@ from typing import Any, Dict, Optional
 from fastapi import FastAPI, HTTPException
 from loguru import logger
 
+from mlops_rakuten.monitoring.prometheus_metrics import (
+    configure_metrics,
+    observe_prediction_confidence,
+)
 from mlops_rakuten.pipelines.prediction import PredictionPipeline
 from mlops_rakuten.services.schemas import (
     CategoryScore,
@@ -44,6 +48,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+configure_metrics(app)
 
 
 def get_pipeline() -> PredictionPipeline:
@@ -80,6 +85,12 @@ def predict(payload: PredictionRequest) -> PredictionResponse:
         )
         for p in preds_raw
     ]
+
+    if preds:
+        observe_prediction_confidence(
+            confidence=preds[0].proba,
+            model_version=str(info.get("version", "unknown")),
+        )
 
     return PredictionResponse(
         designation=payload.designation,

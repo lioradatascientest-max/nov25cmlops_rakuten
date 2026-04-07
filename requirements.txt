@@ -12,6 +12,7 @@ scikit-learn
 tqdm
 typer
 httpx
+prometheus-client
 prometheus-fastapi-instrumentator
 dvc[s3]
 boto3

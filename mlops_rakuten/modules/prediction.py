@@ -1,6 +1,7 @@
 import pickle
 import os
 import tempfile
+import json
 from pathlib import Path
 
 from loguru import logger
@@ -284,11 +285,23 @@ class Prediction:
                     dst_path=tmpdir
                 )
 
-                df_cat = pd.read_json(local_path)
-                self._process_categories(df_cat)
+                with open(local_path, "r", encoding="utf-8") as f:
+                    categories_payload = json.load(f)
+
+                self._process_categories_payload(categories_payload)
+
+            # Certains artifacts MLflow ne contiennent que le mapping
+            # index encodé -> prdtypecode, sans noms lisibles.
+            if self.category_mapping is None and self.use_local_fallback:
+                logger.info(
+                    "Artifact MLflow sans noms de catégories; "
+                    "fallback vers product_categories.csv"
+                )
+                self._load_categories_local()
+                return
 
             logger.success(
-                f"Categories chargées depuis MLflow ({len(self.category_mapping)} entrées)"
+                "Categories chargées depuis MLflow"
             )
 
         except Exception as e:
@@ -306,15 +319,43 @@ class Prediction:
         logger.info(f"Chargement categories local: {cfg.categories_path}")
 
         if not Path(cfg.categories_path).exists():
-            raise FileNotFoundError(
-                f"Categories local introuvable: {cfg.categories_path}"
+            logger.warning(
+                f"Categories local introuvable: {cfg.categories_path}. "
+                "Prediction continuera sans category_name."
             )
+            return
 
         df_cat = pd.read_csv(cfg.categories_path)
         self._process_categories(df_cat)
         logger.success(
             f"Categories chargées (local) - {len(self.category_mapping)} entrées"
         )
+
+    def _process_categories_payload(self, payload) -> None:
+        """
+        Normalise plusieurs formats d'artifacts possibles:
+        - liste de dictionnaires compatible DataFrame
+        - dictionnaire de listes compatible DataFrame
+        - dictionnaire scalaire {encoded_label: prdtypecode}
+          -> ne contient pas les noms de catégories, on continue sans mapping.
+        """
+        if isinstance(payload, list):
+            self._process_categories(pd.DataFrame(payload))
+            return
+
+        if isinstance(payload, dict):
+            if payload and all(not isinstance(v, (list, dict)) for v in payload.values()):
+                logger.warning(
+                    "class_mapping.json ne contient pas les noms de catégories; "
+                    "Prediction continuera sans category_name."
+                )
+                self.category_mapping = None
+                return
+
+            self._process_categories(pd.DataFrame(payload))
+            return
+
+        raise TypeError(f"Format de categories non supporté: {type(payload)!r}")
 
     def _process_categories(self, df_cat: pd.DataFrame) -> None:
         """Traite le DataFrame categories et construit le mapping"""
