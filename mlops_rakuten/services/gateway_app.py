@@ -13,13 +13,14 @@ from mlops_rakuten.auth.auth_simple import (
     authenticate_user,
     create_access_token,
     require_admin,
+    get_current_user,
     require_user,
 )
 from mlops_rakuten.services.schemas import PredictionRequest, PredictionResponse
 
 app = FastAPI(title="Rakuten Gateway", version="1.0.0")
 
-#PREDICT_URL = "http://api-predict:8000"
+PREDICT_URL = "http://api-predict:8000"
 INGEST_URL = "http://api-ingest:8000"
 TRAIN_URL = "http://api-train:8000"
 MONITOR_URL = "http://api-monitor:8000"
@@ -28,6 +29,11 @@ MONITOR_URL = "http://api-monitor:8000"
 @app.get("/health")
 def health() -> Dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/me")
+def me(user: Dict = Depends(get_current_user)):
+    return user
 
 
 @app.post("/token")
@@ -91,36 +97,36 @@ async def proxy_train(_=Depends(require_admin)) -> Any:
         
         reload_start = time.time()
         
-        #async with httpx.AsyncClient(timeout=60) as client:
-        #    reload_r = await client.post(f"{PREDICT_URL}/reload")
+        async with httpx.AsyncClient(timeout=60) as client:
+           reload_r = await client.post(f"{PREDICT_URL}/reload")
         
-        # #reload_success = reload_r.status_code < 400
-        # reload_result = reload_r.json() if reload_success else {"error": reload_r.text}
-        # reload_duration = time.time() - reload_start
+        reload_success = reload_r.status_code < 400
+        reload_result = reload_r.json() if reload_success else {"error": reload_r.text}
+        reload_duration = time.time() - reload_start
         
-        # if not reload_success:
-        #     logger.warning(f"Reload échoué: {reload_r.status_code}")
-        # else:
-        #     logger.success(f"Modèle rechargé en {reload_duration:.1f}s")
+        if not reload_success:
+            logger.warning(f"Reload échoué: {reload_r.status_code}")
+        else:
+            logger.success(f"Modèle rechargé en {reload_duration:.1f}s")
         
-        # return {
-        #     "status": "complete",
-        #     "stages": ["train", "reload"],
-        #     "message": "Training et reload du modèle terminés",
-        #     "training": {
-        #         "status": "success",
-        #         "duration_seconds": train_duration,
-        #         "details": train_result
-        #     },
-        #     "model_reload": {
-        #         "status": "success" if reload_success else "failed",
-        #         "duration_seconds": reload_duration,
-        #         "details": reload_result
-        #     },
-        #     "total_duration_seconds": train_duration + reload_duration,
-        #     "ready_for_predictions": reload_success,
-        #     "next_step": "Modèle prêt pour /predict" if reload_success else "Vérifier les logs"
-        # }
+        return {
+            "status": "complete",
+            "stages": ["train", "reload"],
+            "message": "Training et reload du modèle terminés",
+            "training": {
+                "status": "success",
+                "duration_seconds": train_duration,
+                "details": train_result
+            },
+            "model_reload": {
+                "status": "success" if reload_success else "failed",
+                "duration_seconds": reload_duration,
+                "details": reload_result
+            },
+            "total_duration_seconds": train_duration + reload_duration,
+            "ready_for_predictions": reload_success,
+            "next_step": "Modèle prêt pour /predict" if reload_success else "Vérifier les logs"
+        }
     
     except Exception as e:
         logger.error(f"Erreur pipeline: {e}")
@@ -138,46 +144,46 @@ async def reload_model(_=Depends(require_admin)) -> Dict[str, Any]:
     
     reload_start = time.time()
     
-    # try:
-    #     async with httpx.AsyncClient(timeout=60) as client:
-    #         r = await client.post(f"{PREDICT_URL}/reload")
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            r = await client.post(f"{PREDICT_URL}/reload")
         
-    #     if r.status_code >= 400:
-    #         raise HTTPException(status_code=r.status_code, detail=r.text)
+        if r.status_code >= 400:
+            raise HTTPException(status_code=r.status_code, detail=r.text)
         
-    #     reload_duration = time.time() - reload_start
-    #     result = r.json()
-    #     result["total_duration_seconds"] = reload_duration
+        reload_duration = time.time() - reload_start
+        result = r.json()
+        result["total_duration_seconds"] = reload_duration
         
-    #     logger.success(f"Modèle rechargé en {reload_duration:.1f}s")
-    #     return result
+        logger.success(f"Modèle rechargé en {reload_duration:.1f}s")
+        return result
     
-    # except Exception as e:
-    #     logger.error(f"Erreur reload: {e}")
-        # raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.error(f"Erreur reload: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-# @app.get("/info")
-# async def proxy_info(_=Depends(require_user)):
-#     async with httpx.AsyncClient(timeout=60) as client:
-#         r = await client.get(f"{PREDICT_URL}/info")
-#     if r.status_code >= 400:
-#         raise HTTPException(status_code=r.status_code, detail=r.text)
-#     return r.json()
+@app.get("/info")
+async def proxy_info(_=Depends(require_user)):
+    async with httpx.AsyncClient(timeout=60) as client:
+        r = await client.get(f"{PREDICT_URL}/info")
+    if r.status_code >= 400:
+        raise HTTPException(status_code=r.status_code, detail=r.text)
+    return r.json()
 
 
-# @app.post("/predict", response_model=PredictionResponse)
-# async def proxy_predict(payload: PredictionRequest, _=Depends(require_user)) -> PredictionResponse:
-#     data = payload.model_dump() if hasattr(
-#         payload, "model_dump") else payload.dict()
+@app.post("/predict", response_model=PredictionResponse)
+async def proxy_predict(payload: PredictionRequest, _=Depends(require_user)) -> PredictionResponse:
+    data = payload.model_dump() if hasattr(
+        payload, "model_dump") else payload.dict()
 
-#     async with httpx.AsyncClient(timeout=60) as client:
-#         r = await client.post(f"{PREDICT_URL}/predict", json=data)
+    async with httpx.AsyncClient(timeout=60) as client:
+        r = await client.post(f"{PREDICT_URL}/predict", json=data)
 
-#     if r.status_code >= 400:
-#         raise HTTPException(status_code=r.status_code, detail=r.text)
+    if r.status_code >= 400:
+        raise HTTPException(status_code=r.status_code, detail=r.text)
 
-#     return r.json()
+    return r.json()
 
 
 @app.post("/drift")
@@ -197,7 +203,7 @@ async def proxy_drift(_=Depends(require_admin)) -> Any:
  
  
 @app.get("/drift/report")
-async def proxy_drift_report(_=Depends(require_user)) -> Any:
+async def proxy_drift_report(_=Depends(require_admin)) -> Any:
     """
     Retourne le rapport HTML Evidently — à afficher dans Streamlit.
     Nécessite d'avoir lancé POST /drift au préalable.
