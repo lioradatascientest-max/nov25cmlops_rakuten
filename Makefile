@@ -262,7 +262,7 @@ docker-up-docker:
 ## Start stack — mode Airflow (avec CeleryExecutor, nécessite docker-up-docker)
 .PHONY: docker-up-airflow
 docker-up-airflow:
-	EXECUTION_MODE=docker $(COMPOSE_CMD) --profile airflow up -d --build
+	EXECUTION_MODE=docker $(COMPOSE_CMD) --profile airflow --profile docker up -d --build
 
 ## Start stack — défaut (EXECUTION_MODE depuis .env, sans profil)
 .PHONY: docker-up
