@@ -56,7 +56,7 @@ SHARED_MOUNTS = [
 ]
 
 APP_MOUNT = Mount(
-    source="/home/shiff/datascientest/nov25cmlops_rakuten",
+    source="/home/shiff/mlops_pro/nov25cmlops_rakuten",
     target="/app",
     type="bind",
 )
