@@ -348,6 +348,9 @@ services:
     environment:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_AUTH_ANONYMOUS_ENABLED=true        # accès sans login
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer     # lecture seule
+      - GF_SECURITY_ALLOW_EMBEDDING=true      # autorise les iframes
     networks: [rakuten-net]
     restart: unless-stopped
 
@@ -459,6 +462,36 @@ services:
       retries: 5
     restart: unless-stopped
 
+  # ============================================================================
+  # Streamlit — dashboard UI, toujours présent
+  # ============================================================================
+  streamlit:
+    build:
+      context: ./streamlit
+      dockerfile: Dockerfile
+    container_name: rakuten-streamlit
+    ports:
+      - "8501:8501"
+    volumes:
+      - rakuten_reports:/app/reports
+      - rakuten_logs:/app/logs
+    networks: [rakuten-net]
+    restart: unless-stopped
+    depends_on:
+      gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    environment:
+      - GATEWAY_URL=http://gateway:8000
+      - DAGSHUB_USER=${DAGSHUB_USER}
+      - DAGSHUB_REPO=${DAGSHUB_REPO}
+      - GITHUB_REPO_URL=${GITHUB_REPO_URL}
+      - GITHUB_USER=${GITHUB_USER}
+    env_file: .env
 
 # ============================================================================
 # Volumes

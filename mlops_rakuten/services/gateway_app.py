@@ -13,6 +13,7 @@ from mlops_rakuten.auth.auth_simple import (
     authenticate_user,
     create_access_token,
     require_admin,
+    get_current_user,
     require_user,
 )
 from mlops_rakuten.monitoring.prometheus_metrics import configure_metrics
@@ -30,6 +31,11 @@ MONITOR_URL = "http://api-monitor:8000"
 @app.get("/health")
 def health() -> Dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/me")
+def me(user: Dict = Depends(get_current_user)):
+    return user
 
 
 @app.post("/token")
@@ -199,7 +205,7 @@ async def proxy_drift(_=Depends(require_admin)) -> Any:
  
  
 @app.get("/drift/report")
-async def proxy_drift_report(_=Depends(require_user)) -> Any:
+async def proxy_drift_report(_=Depends(require_admin)) -> Any:
     """
     Retourne le rapport HTML Evidently — à afficher dans Streamlit.
     Nécessite d'avoir lancé POST /drift au préalable.
