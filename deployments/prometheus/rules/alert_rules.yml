@@ -1,0 +1,11 @@
+groups:
+  - name: rakuten-api-alerts
+    rules:
+      - alert: RakutenApiDown
+        expr: up{job="rakuten-fastapi"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Rakuten API service down"
+          description: "The FastAPI target {{ $labels.instance }} has been unreachable for more than 1 minute."

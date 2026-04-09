@@ -6,6 +6,7 @@ from typing import Any, Dict
 
 from fastapi import FastAPI, File, HTTPException, UploadFile, status, Query
 from mlops_rakuten.config.constants import UPLOADS_DATA_DIR
+from mlops_rakuten.monitoring.prometheus_metrics import configure_metrics
 from mlops_rakuten.pipelines.data_ingestion import DataIngestionPipeline
 from mlops_rakuten.utils.utils import create_directories
 import os
@@ -26,6 +27,7 @@ app = FastAPI(
     version="1.0.0",
     description=f"Mode d'exécution actuel : **{EXECUTION_MODE}**",
 )
+configure_metrics(app)
 
 
 @app.get("/health")

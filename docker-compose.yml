@@ -304,6 +304,18 @@ services:
       - rakuten-net
     restart: unless-stopped
 
+  node-exporter:
+    image: quay.io/prometheus/node-exporter:latest
+    container_name: rakuten-node-exporter
+    command:
+      - --path.rootfs=/host
+    ports:
+      - "9100:9100"
+    volumes:
+      - /:/host:ro
+    networks: [rakuten-net]
+    restart: unless-stopped
+
   # ============================================================================
   # Monitoring — toujours présent
   # ============================================================================
@@ -314,10 +326,12 @@ services:
       - "9090:9090"
     volumes:
       - ./deployments/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deployments/prometheus/rules:/etc/prometheus/rules:ro
       - rakuten_prometheus_data:/prometheus
     networks: [rakuten-net]
     depends_on:
       - nginx_exporter
+      - node-exporter
     restart: unless-stopped
 
   grafana:
@@ -327,6 +341,9 @@ services:
       - "3000:3000"
     volumes:
       - rakuten_grafana_data:/var/lib/grafana
+      - ./deployments/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./deployments/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./deployments/grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on: [prometheus]
     environment:
       - GF_SECURITY_ADMIN_USER=admin

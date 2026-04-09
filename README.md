@@ -164,7 +164,8 @@ Les services FastAPI (`api-ingest`, `api-train`) exécutent DVC et Git via **sub
 
 ```bash
 make docker-up-cli
-# Lance : nginx + gateway + api-ingest + api-train + api-predict + monitoring
+# Lance : nginx + gateway + api-ingest + api-train + api-predict + api-monitor
+#       + prometheus + grafana + nginx_exporter + node-exporter
 ```
 
 #### EXECUTION_MODE=docker (docker-in-docker)
@@ -544,6 +545,11 @@ make api-train
 make api-predict TEXT="Vélo électrique pliable" TOPK=3
 ```
 
+`make docker-up-cli` démarre aussi automatiquement la stack de monitoring
+`Prometheus + Grafana`, ainsi que `nginx_exporter` et `node-exporter`.
+Les dashboards Grafana et la datasource Prometheus sont provisionnés
+automatiquement au démarrage.
+
 ### Mode Docker-in-Docker
 
 ```bash
@@ -633,6 +639,11 @@ Prometheus / Grafana  → métriques infra (latence HTTP, CPU, requêtes nginx)
 
 - **Prometheus** : métriques système et applicatives → [http://localhost:9090](http://localhost:9090)
 - **Grafana** : dashboards → [http://localhost:3000](http://localhost:3000) (admin/admin)
+
+Au démarrage via `make docker-up-cli`, `make docker-up-docker` ou `make docker-up`,
+la stack monitoring est lancée automatiquement. Grafana charge aussi
+automatiquement la datasource Prometheus et les dashboards versionnés dans
+`deployments/grafana/`.
 
 ---
 

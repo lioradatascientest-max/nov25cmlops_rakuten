@@ -43,10 +43,25 @@ echo "[Git] Configured to use SSH for GitHub"
 # ============================================================================
 
 if [ -d "/app/.dvc" ]; then
-    dvc config core.autostage true
-    echo "[DVC] autostage enabled"
+    if [ -n "$DAGSHUB_USER" ] && [ -n "$DAGSHUB_REPO" ]; then
+        DVC_REMOTE_URL="https://dagshub.com/${DAGSHUB_USER}/${DAGSHUB_REPO}.s3"
+        dvc remote add -d origin "$DVC_REMOTE_URL" >/dev/null 2>&1 || \
+        dvc remote modify origin url "$DVC_REMOTE_URL" >/dev/null 2>&1 || \
+        echo "[Warning] Unable to configure DVC remote origin"
+        echo "[DVC] origin = $DVC_REMOTE_URL"
+    fi
+
+    if [ -n "$DAGSHUB_TOKEN" ]; then
+        dvc remote modify origin --local access_key_id "$DAGSHUB_TOKEN" >/dev/null 2>&1 || \
+        echo "[Warning] Unable to set DVC access_key_id"
+        dvc remote modify origin --local secret_access_key "$DAGSHUB_TOKEN" >/dev/null 2>&1 || \
+        echo "[Warning] Unable to set DVC secret_access_key"
+    fi
+
+    dvc config core.autostage true >/dev/null 2>&1 || echo "[Warning] Unable to enable DVC autostage"
+    echo "[DVC] autostage configured"
     echo "[DVC] Configured remotes:"
-    dvc remote list || echo "[DVC] No remotes configured"
+    dvc remote list || echo "[Warning] Unable to list DVC remotes"
 else
     echo "[Warning] .dvc directory not found"
 fi

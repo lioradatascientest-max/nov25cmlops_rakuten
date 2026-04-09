@@ -15,9 +15,11 @@ from mlops_rakuten.auth.auth_simple import (
     require_admin,
     require_user,
 )
+from mlops_rakuten.monitoring.prometheus_metrics import configure_metrics
 from mlops_rakuten.services.schemas import PredictionRequest, PredictionResponse
 
 app = FastAPI(title="Rakuten Gateway", version="1.0.0")
+configure_metrics(app)
 
 #PREDICT_URL = "http://api-predict:8000"
 INGEST_URL = "http://api-ingest:8000"
