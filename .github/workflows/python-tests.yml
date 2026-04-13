@@ -35,7 +35,7 @@ jobs:
       - name: DVC Pull
         run: |
           python -m dvc remote modify storage auth basic
-          python -m dvc remote modify storage user samuel.beau
+          python -m dvc remote modify storage user lioradatascientest
           python -m dvc remote modify storage password ${{ secrets.DAGSHUB_TOKEN }}
           python -m dvc pull
 
