@@ -9,7 +9,7 @@ on:
       - feature/mlflow-docker-dvc-sb-2
 
 jobs:
-  # PREMIER JOB : Les Tests (votre configuration actuelle qui fonctionne)
+  # PREMIER JOB : Les Tests (votre configuration actuelle qui fonctionne) - repo liora
   test-suite:
     runs-on: ubuntu-latest
     env:

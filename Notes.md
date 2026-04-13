@@ -1,4 +1,6 @@
 
+source .venv/bin/activate
+
 make docker-up-docker
 
 make swagger
