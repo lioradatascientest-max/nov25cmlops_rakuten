@@ -222,6 +222,19 @@ api-reload:
 		-H "Authorization: Bearer $(TOKEN)" \
 		| python -m json.tool
 
+
+# curl : POST /drift - compare les distribtions entre le dernier batch ingéré et les données d'entraînement 
+.PHONY: api-drift
+api-drift:
+	@echo "POST $(API_URL)/drift"
+	@curl -s -k -X POST "$(API_URL)/drift" \
+		-H "Authorization: Bearer $(TOKEN)" \
+		| python -m json.tool
+
+.PHONY: api-drift-report
+api-drift-report:
+	explorer.exe reports/drift/drift_report.html
+
 #################################################################################
 # DOCKER COMPOSE
 #################################################################################
@@ -230,6 +243,11 @@ api-reload:
 .PHONY: docker-build
 docker-build:
 	$(COMPOSE_CMD) build
+
+## Build airflow initialisation (one time before first docker-up-airflow)
+.PHONY: docker-build-airflow
+docker-build-airflow:
+	$(COMPOSE_CMD) --profile airflow build airflow-init
 
 ## Start stack — mode CLI subprocess (sans dvc/git runner)
 .PHONY: docker-up-cli
@@ -240,6 +258,11 @@ docker-up-cli:
 .PHONY: docker-up-docker
 docker-up-docker:
 	EXECUTION_MODE=docker $(COMPOSE_CMD) --profile docker up -d --build
+
+## Start stack — mode Airflow (avec CeleryExecutor, nécessite docker-up-docker)
+.PHONY: docker-up-airflow
+docker-up-airflow:
+	EXECUTION_MODE=docker $(COMPOSE_CMD) --profile airflow --profile docker up -d --build
 
 ## Start stack — défaut (EXECUTION_MODE depuis .env, sans profil)
 .PHONY: docker-up
@@ -287,7 +310,23 @@ docker-mode:
 .PHONY: mflow-ui
 mlflow-ui:
 	open https://dagshub.com/shiff-oumi/nov25cmlops_rakuten_dag.mlflow \
-	  2>/dev/null || xdg-open https://dagshub.com/shiff-oumi/nov25cmlops_rakuten_dag.mlflow		
+	  2>/dev/null || xdg-open https://dagshub.com/shiff-oumi/nov25cmlops_rakuten_dag.mlflow	
+
+#################################################################################
+# Airflow UI
+#################################################################################
+.PHONY: airflow-ui
+airflow-ui:
+	open http://localhost:8080 \
+	  2>/dev/null || xdg-open http://localhost:8080
+
+#################################################################################
+# Graphana UI (Prometheus + Grafana monitoring)
+#################################################################################
+.PHONY: grafana-ui
+grafana-ui:
+	open http://localhost:3000 \
+	  2>/dev/null || xdg-open http://localhost:3000
 
 #################################################################################
 # QUICK SMOKE TESTS

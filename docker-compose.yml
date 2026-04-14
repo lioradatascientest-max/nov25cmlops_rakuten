@@ -1,16 +1,55 @@
 # docker-compose.yml - Rakuten MLOps Full Stack
 #
-# Deux modes d'exécution via EXECUTION_MODE :
-#   EXECUTION_MODE=cli    → subprocess dans le container (pas de dvc/git runner)
-#   EXECUTION_MODE=docker → docker exec vers dvc-runner / git-runner (défaut actuel)
-#
-# Usage :
-#   make docker-up-cli     → EXECUTION_MODE=cli    (sans dvc/git runner)
-#   make docker-up-docker  → EXECUTION_MODE=docker (avec dvc/git runner)
+# Trois modes d'exécution :
+#   make docker-up-cli     → EXECUTION_MODE=cli    (sans runners, sans airflow)
+#   make docker-up-docker  → EXECUTION_MODE=docker (avec dvc/git runners, sans airflow)
+#   make docker-up-airflow → EXECUTION_MODE=cli (avec airflow CeleryExecutor)
+
+# ============================================================================
+# Airflow — configuration commune 
+# ============================================================================
+x-airflow-common: &airflow-common
+  image: ${AIRFLOW_IMAGE_NAME:-apache/airflow:2.9.0}
+  profiles: ["airflow"]
+  environment: &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+    AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow
+    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@airflow-postgres/airflow
+    AIRFLOW__CELERY__BROKER_URL: redis://:@airflow-redis:6379/0
+    AIRFLOW__CORE__FERNET_KEY: ""
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__API__AUTH_BACKEND: "airflow.api.auth.backend.basic_auth"
+    _PIP_ADDITIONAL_REQUIREMENTS: "apache-airflow-providers-docker"
+    # Variables injectées dans le dag
+    DAGSHUB_USER: ${DAGSHUB_USER}
+    DAGSHUB_REPO: ${DAGSHUB_REPO}
+    DAGSHUB_TOKEN: ${DAGSHUB_TOKEN}
+    MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
+    MLFLOW_TRACKING_USERNAME: ${MLFLOW_TRACKING_USERNAME}
+    MLFLOW_TRACKING_PASSWORD: ${DAGSHUB_TOKEN}
+    GIT_AUTHOR_NAME: ${GIT_AUTHOR_NAME}
+    GIT_AUTHOR_EMAIL: ${GIT_AUTHOR_EMAIL}
+    EXECUTION_MODE: docker
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - rakuten_airflow_logs:/opt/airflow/logs
+    - ./plugins:/opt/airflow/plugins
+    - /var/run/docker.sock:/var/run/docker.sock   # DockerOperator
+    - ~/.ssh:/root/.ssh
+  user: "${AIRFLOW_UID:-50000}:0"
+  group_add:
+    - "${DOCKER_GID:-1001}"
+  depends_on: &airflow-common-depends
+    airflow-postgres:
+      condition: service_healthy
+    airflow-redis:
+      condition: service_healthy
+  networks: [rakuten-net]
 
 services:
   # ============================================================================
-  # API Gateway (Main Entry Point) — toujours présent
+  # API Gateway — toujours présent
   # ============================================================================
   gateway:
     build:
@@ -20,7 +59,7 @@ services:
     command: ["uvicorn", "mlops_rakuten.services.gateway_app:app", "--host", "0.0.0.0", "--port", "8000"]
     volumes:
       - rakuten_logs:/app/logs
-      - /var/run/docker.sock:/var/run/docker.sock  # nécessaire en mode docker uniquement pour appeler les containers entre eux.
+      - /var/run/docker.sock:/var/run/docker.sock
     networks: [rakuten-net]
     restart: unless-stopped
     depends_on:
@@ -29,6 +68,8 @@ services:
       api-ingest:
         condition: service_healthy
       api-train:
+        condition: service_healthy
+      api-monitor:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -41,7 +82,7 @@ services:
     env_file: .env
 
   # ============================================================================
-  # API: Data Ingestion — toujours présent
+  # Data Ingestion — toujours présent
   # ============================================================================
   api-ingest:
     build:
@@ -54,8 +95,6 @@ services:
       - rakuten_logs:/app/logs
       - rakuten_dvc_cache:/app/.dvc/cache
       - ~/.ssh:/root/.ssh
-      # docker.sock monté conditionnellement via la variable — toujours présent
-      # mais utilisé seulement si EXECUTION_MODE=docker
       - /var/run/docker.sock:/var/run/docker.sock
     networks: [rakuten-net]
     restart: unless-stopped
@@ -76,7 +115,7 @@ services:
     env_file: .env
 
   # ============================================================================
-  # API: Model Training — toujours présent
+  # Model Training — toujours présent
   # ============================================================================
   api-train:
     build:
@@ -91,7 +130,7 @@ services:
       - rakuten_logs:/app/logs
       - rakuten_dvc_cache:/app/.dvc/cache
       - ~/.ssh:/root/.ssh
-      - /var/run/docker.sock:/var/run/docker.sock # nécessaire en mode docker uniquement pour appeler les containers entre eux.
+      - /var/run/docker.sock:/var/run/docker.sock
     networks: [rakuten-net]
     restart: unless-stopped
     healthcheck:
@@ -113,7 +152,7 @@ services:
     env_file: .env
 
   # ============================================================================
-  # API: Model Prediction — toujours présent
+  # Model Prediction — toujours présent
   # ============================================================================
   api-predict:
     build:
@@ -141,6 +180,38 @@ services:
       - DAGSHUB_TOKEN=${DAGSHUB_TOKEN}
     env_file: .env
 
+    # ============================================================================
+  # Evidently - drift monitoring - Toujours présent
+  # ============================================================================
+  api-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rakuten-monitor
+    command: ["uvicorn", "mlops_rakuten.services.monitor_app:app", "--host", "0.0.0.0", "--port", "8000"]
+    volumes:
+      - .:/app                          # accès à data/interim, data/uploads, data/raw
+      - rakuten_reports:/app/reports    # rapport HTML partagé avec Streamlit
+      - rakuten_logs:/app/logs
+      - rakuten_models:/app/models
+    networks: [rakuten-net]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    environment:
+      - REFERENCE_CSV=/app/data/interim/rakuten_train.csv
+      - UPLOADS_DIR=/app/data/raw/uploads
+      - SEEDS_DIR=/app/data/raw/rakuten/seeds
+      - MODELS_DIR=/app/models
+      - REPORT_PATH=/app/reports/drift/drift_report.html
+      - MLFLOW_TRACKING_URI=${MLFLOW_TRACKING_URI}
+      - MLFLOW_TRACKING_USERNAME=${MLFLOW_TRACKING_USERNAME}
+      - DAGSHUB_TOKEN=${DAGSHUB_TOKEN}
+    env_file: .env
+
   # ============================================================================
   # DVC Runner — profil docker uniquement
   # ============================================================================
@@ -151,7 +222,7 @@ services:
     container_name: rakuten-dvc-runner
     working_dir: /app
     command: ["sleep", "infinity"]
-    profiles: ["docker"]                    # actif seulement avec --profile docker
+    profiles: ["docker"]
     volumes:
       - .:/app
       - rakuten_dvc_cache:/app/.dvc/cache
@@ -183,7 +254,7 @@ services:
     container_name: rakuten-git-runner
     working_dir: /app
     command: ["sleep", "infinity"]
-    profiles: ["docker"]                    #actif seulement avec --profile docker
+    profiles: ["docker"]
     volumes:
       - .:/app
       - rakuten_dvc_cache:/app/.dvc/cache
@@ -233,6 +304,18 @@ services:
       - rakuten-net
     restart: unless-stopped
 
+  node-exporter:
+    image: quay.io/prometheus/node-exporter:latest
+    container_name: rakuten-node-exporter
+    command:
+      - --path.rootfs=/host
+    ports:
+      - "9100:9100"
+    volumes:
+      - /:/host:ro
+    networks: [rakuten-net]
+    restart: unless-stopped
+
   # ============================================================================
   # Monitoring — toujours présent
   # ============================================================================
@@ -243,10 +326,12 @@ services:
       - "9090:9090"
     volumes:
       - ./deployments/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deployments/prometheus/rules:/etc/prometheus/rules:ro
       - rakuten_prometheus_data:/prometheus
     networks: [rakuten-net]
     depends_on:
       - nginx_exporter
+      - node-exporter
     restart: unless-stopped
 
   grafana:
@@ -256,12 +341,157 @@ services:
       - "3000:3000"
     volumes:
       - rakuten_grafana_data:/var/lib/grafana
+      - ./deployments/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./deployments/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./deployments/grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on: [prometheus]
     environment:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_AUTH_ANONYMOUS_ENABLED=true        # accès sans login
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer     # lecture seule
+      - GF_SECURITY_ALLOW_EMBEDDING=true      # autorise les iframes
     networks: [rakuten-net]
     restart: unless-stopped
+
+  # ============================================================================
+  # Airflow — profil airflow 
+  # ============================================================================
+
+  airflow-postgres:
+    image: postgres:13
+    profiles: ["airflow"]
+    container_name: rakuten-airflow-postgres
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - rakuten_airflow_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 5
+    networks: [rakuten-net]
+    restart: unless-stopped
+
+  airflow-redis:
+    image: redis:latest
+    profiles: ["airflow"]
+    container_name: rakuten-airflow-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 30s
+      retries: 50
+    networks: [rakuten-net]
+    restart: unless-stopped
+
+  airflow-init:
+    <<: *airflow-common
+    container_name: rakuten-airflow-init
+    command: version
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_UPGRADE: "true"
+      _AIRFLOW_WWW_USER_CREATE: "true"
+      _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-airflow}
+      _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-airflow}
+
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: rakuten-airflow-webserver
+    command: webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+    depends_on:
+      <<: *airflow-common-depends
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: rakuten-airflow-scheduler
+    command: scheduler
+    healthcheck:
+      test: ["CMD-SHELL", 'airflow jobs check --job-type SchedulerJob --hostname "$${HOSTNAME}"']
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+    depends_on:
+      <<: *airflow-common-depends
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-worker:
+    <<: *airflow-common
+    container_name: rakuten-airflow-worker
+    command: celery worker
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - 'celery --app airflow.executors.celery_executor.app inspect ping -d "celery@$${HOSTNAME}"'
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+    depends_on:
+      <<: *airflow-common-depends
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-flower:
+    <<: *airflow-common
+    container_name: rakuten-airflow-flower
+    command: celery flower
+    ports:
+      - "5555:5555"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:5555/"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  # ============================================================================
+  # Streamlit — dashboard UI, toujours présent
+  # ============================================================================
+  streamlit:
+    build:
+      context: ./streamlit
+      dockerfile: Dockerfile
+    container_name: rakuten-streamlit
+    ports:
+      - "8501:8501"
+    volumes:
+      - rakuten_reports:/app/reports
+      - rakuten_logs:/app/logs
+    networks: [rakuten-net]
+    restart: unless-stopped
+    depends_on:
+      gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    environment:
+      - GATEWAY_URL=http://gateway:8000
+      - DAGSHUB_USER=${DAGSHUB_USER}
+      - DAGSHUB_REPO=${DAGSHUB_REPO}
+      - GITHUB_REPO_URL=${GITHUB_REPO_URL}
+      - GITHUB_USER=${GITHUB_USER}
+    env_file: .env
 
 # ============================================================================
 # Volumes
@@ -279,6 +509,10 @@ volumes:
     name: rakuten_prometheus_data
   rakuten_grafana_data:
     name: rakuten_grafana_data
+  rakuten_airflow_db:
+    name: rakuten_airflow_db
+  rakuten_airflow_logs:
+    name: rakuten_airflow_logs
 
 # ============================================================================
 # Networks
