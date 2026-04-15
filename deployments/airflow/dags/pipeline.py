@@ -30,7 +30,7 @@ import docker as docker_sdk
 from airflow import DAG
 from airflow.providers.docker.operators.docker import DockerOperator
 from docker.types import Mount
-from deployments.airflow.dags.utils import resolve_project_root, resolve_ssh_dir
+from dag_utils import resolve_project_root, resolve_ssh_dir
 
 # ===========================================================================
 # Résolution du chemin hôte via le socket Docker

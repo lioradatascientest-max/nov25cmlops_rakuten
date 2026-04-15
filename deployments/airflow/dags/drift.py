@@ -22,7 +22,7 @@ from airflow import DAG
 from airflow.providers.docker.operators.docker import DockerOperator
 from docker.types import Mount
 
-from deployments.airflow.dags.utils import resolve_project_root
+from dag_utils import resolve_project_root
 
 # ===========================================================================
 # Résolution du chemin hôte
