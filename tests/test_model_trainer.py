@@ -18,6 +18,10 @@ def test_model_trainer_trains_and_saves_artifacts(tmp_path):
     X_train_path = processed_dir / "X_train_tfidf.npz"
     y_train_path = processed_dir / "y_train.npy"
     model_path = models_dir / "text_classifier.pkl"
+    
+    vectorizer_path = processed_dir / "tfidf_vectorizer.pkl"
+    label_encoder_path = processed_dir / "label_encoder.pkl"
+    class_mapping_path = processed_dir / "class_mapping.json"
 
     X_data = np.array(
         [
@@ -40,11 +44,22 @@ def test_model_trainer_trains_and_saves_artifacts(tmp_path):
         y_train_path=y_train_path,
         model_dir=models_dir,
         model_path=model_path,
+        vectorizer_path=vectorizer_path,
+        label_encoder_path=label_encoder_path,
+        class_mapping_path=class_mapping_path,
         model_type="logistic_regression",
         C=1.0,
         max_iter=1000,
         use_class_weight=False,
     )
+    
+    # Créer des fichiers factices pour satisfaire le logging MLflow
+    with open(vectorizer_path, "wb") as f:
+        pickle.dump("dummy_vectorizer", f)
+    with open(label_encoder_path, "wb") as f:
+        pickle.dump("dummy_le", f)
+    with open(class_mapping_path, "w") as f:
+        json.dump({"dummy": 0}, f)
 
     step = ModelTrainer(config=cfg)
     output_model_path = step.run()
