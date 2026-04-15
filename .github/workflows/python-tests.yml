@@ -34,9 +34,9 @@ jobs:
 
       - name: DVC Pull
         run: |
-          python -m dvc remote modify storage auth basic
-          python -m dvc remote modify storage user lioradatascientest
-          python -m dvc remote modify storage password ${{ secrets.DAGSHUB_TOKEN }}
+          python -m dvc remote modify origin auth basic
+          python -m dvc remote modify origin user lioradatascientest
+          python -m dvc remote modify origin password ${{ secrets.DAGSHUB_TOKEN }}
           python -m dvc pull
 
       - name: Create missing directories and dummy data
