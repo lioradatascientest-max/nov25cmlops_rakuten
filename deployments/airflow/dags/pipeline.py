@@ -12,38 +12,45 @@ Flow démo :
 
 En prod : remplacer le trigger manuel par un FileSensor sur data/uploads/
 
-Mounts :
-  - APP_MOUNT  : bind sur PROJECT_ROOT (var d'env, définie dans .env ou
-                 détectée automatiquement via le socket Docker du scheduler)
-  - SSH_MOUNT  : bind sur SSH_DIR (var d'env ou $HOME/.ssh par défaut)
-  Ces deux variables doivent pointer vers des chemins valides sur l'hôte Docker,
-  pas dans le container Airflow.
+Résolution des chemins hôte :
+  Le DAG s'auto-localise en inspectant ses propres mounts via le socket Docker.
+  Il cherche le mount /opt/airflow/dags dans le container courant, remonte
+  deux niveaux (dags/ → deployments/airflow/ → racine projet) et obtient
+  le chemin absolu hôte sans aucune variable d'environnement.
 """
 
 from __future__ import annotations
 
 import os
+import socket
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import docker as docker_sdk
 from airflow import DAG
 from airflow.providers.docker.operators.docker import DockerOperator
 from docker.types import Mount
+from deployments.airflow.dags.utils import resolve_project_root, resolve_ssh_dir
 
 # ===========================================================================
-# Chemins hôte — résolution dynamique
+# Résolution du chemin hôte via le socket Docker
 # ===========================================================================
 
-# PROJECT_ROOT : chemin absolu du repo sur l'hôte Docker.
-_dags_dir = Path(__file__).resolve().parent          # .../nov25cmlops_rakuten/dags
-_default_project_root = str(_dags_dir.parent)        # .../nov25cmlops_rakuten
+PROJECT_ROOT = resolve_project_root()
+SSH_DIR      = resolve_ssh_dir()
 
-PROJECT_ROOT = os.environ.get("PROJECT_ROOT", _default_project_root)
+if not PROJECT_ROOT:
+    raise RuntimeError(
+        "DAG : impossible de résoudre PROJECT_ROOT via le socket Docker. "
+        "Vérifier que /var/run/docker.sock est monté dans le container Airflow "
+        "et que ./deployments/airflow/dags est bien monté sur /opt/airflow/dags."
+    )
 
-# SSH_DIR : chemin absolu du dossier .ssh sur l'hôte Docker.
-# Priorité : variable d'env SSH_DIR → $HOME/.ssh
-_default_ssh_dir = str(Path.home() / ".ssh")
-SSH_DIR = os.environ.get("SSH_DIR", _default_ssh_dir)
+if not SSH_DIR:
+    raise RuntimeError(
+        "DAG : impossible de résoudre SSH_DIR via le socket Docker. "
+        "Vérifier que ~/.ssh:/root/.ssh est monté dans le container Airflow."
+    )
 
 # ===========================================================================
 # Config partagée
@@ -59,13 +66,13 @@ DEFAULT_ARGS = {
 DOCKER_NETWORK = "nov25cmlops_rakuten_rakuten-net"
 
 SHARED_ENV = {
-    "EXECUTION_MODE":  "cli",
-    "DAGSHUB_USER":    os.environ.get("DAGSHUB_USER", ""),
-    "DAGSHUB_REPO":    os.environ.get("DAGSHUB_REPO", ""),
-    "DAGSHUB_TOKEN":   os.environ.get("DAGSHUB_TOKEN", ""),
-    "GIT_AUTHOR_NAME": os.environ.get("GIT_AUTHOR_NAME", ""),
-    "GIT_AUTHOR_EMAIL":os.environ.get("GIT_AUTHOR_EMAIL", ""),
-    "GITHUB_USER":     os.environ.get("GITHUB_USER", ""),
+    "EXECUTION_MODE":   "cli",
+    "DAGSHUB_USER":     os.environ.get("DAGSHUB_USER", ""),
+    "DAGSHUB_REPO":     os.environ.get("DAGSHUB_REPO", ""),
+    "DAGSHUB_TOKEN":    os.environ.get("DAGSHUB_TOKEN", ""),
+    "GIT_AUTHOR_NAME":  os.environ.get("GIT_AUTHOR_NAME", ""),
+    "GIT_AUTHOR_EMAIL": os.environ.get("GIT_AUTHOR_EMAIL", ""),
+    "GITHUB_USER":      os.environ.get("GITHUB_USER", ""),
     "GIT_SSH_COMMAND": (
         "ssh -i /root/.ssh/id_github "
         "-o StrictHostKeyChecking=no "
@@ -79,7 +86,7 @@ MLFLOW_ENV = {
     "MLFLOW_TRACKING_PASSWORD": os.environ.get("DAGSHUB_TOKEN", ""),
 }
 
-# Volumes nommés Docker (partagés avec les autres services de la stack)
+# Volumes nommés partagés avec la stack principale
 SHARED_MOUNTS = [
     Mount(source="rakuten_dvc_cache", target="/app/.dvc/cache", type="volume"),
     Mount(source="rakuten_models",    target="/app/models",     type="volume"),
@@ -87,18 +94,9 @@ SHARED_MOUNTS = [
     Mount(source="rakuten_reports",   target="/app/reports",    type="volume"),
 ]
 
-# Bind mounts résolus dynamiquement sur l'hôte
-APP_MOUNT = Mount(
-    source=PROJECT_ROOT,
-    target="/app",
-    type="bind",
-)
-
-SSH_MOUNT = Mount(
-    source=SSH_DIR,
-    target="/root/.ssh",
-    type="bind",
-)
+# Bind mounts résolus depuis l'hôte Docker
+APP_MOUNT = Mount(source=PROJECT_ROOT, target="/app",       type="bind")
+SSH_MOUNT = Mount(source=SSH_DIR,      target="/root/.ssh", type="bind")
 
 # ===========================================================================
 # DAG
@@ -109,7 +107,7 @@ with DAG(
     description="Pipeline ML Rakuten : ingest → train → validate → drift",
     default_args=DEFAULT_ARGS,
     start_date=datetime(2025, 1, 1),
-    schedule_interval=None,   # déclenchement manuel pour la démo
+    schedule_interval=None,
     catchup=False,
     tags=["rakuten", "mlops", "docker"],
 ) as dag:
@@ -161,7 +159,7 @@ with DAG(
 
     # -----------------------------------------------------------------------
     # STEP 3 — Validate
-    # Requête de prédiction smoke-test pour vérifier que @production répond.
+    # Smoke-test : vérifie que le modèle @production répond.
     # -----------------------------------------------------------------------
     validate = DockerOperator(
         task_id="validate",
@@ -182,10 +180,8 @@ with DAG(
 
     # -----------------------------------------------------------------------
     # STEP 4 — Drift Monitor
-    # Rapport Evidently référence vs dernier batch.
-    # trigger_rule="all_done" → tourne même si validate échoue.
-    # Réutilise l'image api-ingest (même codebase, pas d'image dédiée).
-    # Lie le run drift au dernier run d'entraînement via mlflow_run_metadata.json.
+    # Non bloquant : tourne même si validate échoue (trigger_rule=all_done).
+    # Réutilise l'image api-ingest (même codebase).
     # -----------------------------------------------------------------------
     drift_monitor = DockerOperator(
         task_id="drift_monitor",
@@ -216,7 +212,4 @@ with DAG(
         trigger_rule="all_done",
     )
 
-    # -----------------------------------------------------------------------
-    # Dépendances
-    # -----------------------------------------------------------------------
     ingest >> train >> validate >> drift_monitor

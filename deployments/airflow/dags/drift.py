@@ -13,15 +13,32 @@ Différence avec rakuten_ml_pipeline :
   - Utile pour détecter une dérive rapide entre deux entraînements
 """
 
-from datetime import datetime, timedelta
+from __future__ import annotations
+
 import os
+from datetime import datetime, timedelta
 
 from airflow import DAG
 from airflow.providers.docker.operators.docker import DockerOperator
 from docker.types import Mount
 
+from deployments.airflow.dags.utils import resolve_project_root
+
 # ===========================================================================
-# Config — identique au DAG principal pour cohérence
+# Résolution du chemin hôte
+# ===========================================================================
+
+PROJECT_ROOT = resolve_project_root()
+
+if not PROJECT_ROOT:
+    raise RuntimeError(
+        "DAG drift : impossible de résoudre PROJECT_ROOT via le socket Docker. "
+        "Vérifier que /var/run/docker.sock est monté dans le container Airflow "
+        "et que ./deployments/airflow/dags est bien monté sur /opt/airflow/dags."
+    )
+
+# ===========================================================================
+# Config
 # ===========================================================================
 
 DEFAULT_ARGS = {
@@ -34,12 +51,12 @@ DEFAULT_ARGS = {
 DOCKER_NETWORK = "nov25cmlops_rakuten_rakuten-net"
 
 SHARED_ENV = {
-    "EXECUTION_MODE": "cli",
-    "DAGSHUB_USER":    os.environ.get("DAGSHUB_USER", ""),
-    "DAGSHUB_REPO":    os.environ.get("DAGSHUB_REPO", ""),
-    "DAGSHUB_TOKEN":   os.environ.get("DAGSHUB_TOKEN", ""),
-    "GIT_AUTHOR_NAME": os.environ.get("GIT_AUTHOR_NAME", ""),
-    "GIT_AUTHOR_EMAIL":os.environ.get("GIT_AUTHOR_EMAIL", ""),
+    "EXECUTION_MODE":   "cli",
+    "DAGSHUB_USER":     os.environ.get("DAGSHUB_USER", ""),
+    "DAGSHUB_REPO":     os.environ.get("DAGSHUB_REPO", ""),
+    "DAGSHUB_TOKEN":    os.environ.get("DAGSHUB_TOKEN", ""),
+    "GIT_AUTHOR_NAME":  os.environ.get("GIT_AUTHOR_NAME", ""),
+    "GIT_AUTHOR_EMAIL": os.environ.get("GIT_AUTHOR_EMAIL", ""),
 }
 
 MLFLOW_ENV = {
@@ -55,11 +72,9 @@ SHARED_MOUNTS = [
     Mount(source="rakuten_reports",   target="/app/reports",    type="volume"),
 ]
 
-APP_MOUNT = Mount(
-    source="/home/shiff/mlops_pro/nov25cmlops_rakuten",
-    target="/app",
-    type="bind",
-)
+APP_MOUNT = Mount(source=PROJECT_ROOT, target="/app", type="bind")
+
+# Pas de SSH_MOUNT — ce DAG ne fait pas de git push
 
 # ===========================================================================
 # DAG
@@ -70,18 +85,11 @@ with DAG(
     description="Drift monitoring Rakuten — Evidently (indépendant du pipeline)",
     default_args=DEFAULT_ARGS,
     start_date=datetime(2025, 1, 1),
-    schedule_interval="0 */6 * * *",  # toutes les 6h — adapter selon besoin
+    schedule_interval="0 */6 * * *",  # toutes les 6h
     catchup=False,
     tags=["rakuten", "monitoring", "evidently", "drift"],
 ) as dag:
 
-    # -----------------------------------------------------------------------
-    # STEP 1 — Drift Monitor
-    # Compare rakuten_train.csv (référence) vs dernier batch disponible
-    #   - Priorité uploads/ (ingest récent)
-    #   - Fallback seeds/ (batches de base)
-    # Lit mlflow_run_metadata.json pour lier au bon run d'entraînement
-    # -----------------------------------------------------------------------
     drift_monitor = DockerOperator(
         task_id="drift_monitor",
         image="nov25cmlops_rakuten-api-ingest:latest",
@@ -99,7 +107,7 @@ with DAG(
                 "    models_dir=Path('/app/models'),"
                 "    mlflow_tracking_uri=os.getenv('MLFLOW_TRACKING_URI'),"
                 ")"
-            )
+            ),
         ],
         docker_url="unix://var/run/docker.sock",
         network_mode=DOCKER_NETWORK,
@@ -110,5 +118,4 @@ with DAG(
         tty=False,
     )
 
-    # DAG à tâche unique — pas de dépendances à déclarer
     drift_monitor
