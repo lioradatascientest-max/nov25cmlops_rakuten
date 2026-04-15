@@ -9,7 +9,7 @@ PYTHON_INTERPRETER := python
 # Docker compose command (supports docker-compose v1 or docker compose v2)
 COMPOSE_CMD := $(shell \
 	if command -v docker-compose >/dev/null 2>&1; then \
-		echo docker compose; \
+		echo docker-compose; \
 	else \
 		echo docker compose; \
 	fi \
@@ -24,7 +24,7 @@ SVC_INGEST  := api-ingest
 SVC_DVC	 := dvc-runner
 SVC_GIT	 := git-runner
 
-# Variable 
+# Variables par défaut
 CSV       :=
 SEEDS_DIR ?= data/raw/rakuten/seeds
 TEXT      ?= Super aspirateur sans fil Dyson
@@ -102,14 +102,7 @@ dvc-credentials:
 .PHONY: dvc-test
 dvc-test:
 	@echo "Test connexion DVC vers DagsHub..."
-	@dvc status && echo "Connected to DagsHub" || echo "Connection failed"
-
-## Force reset DVC tracking for debbugging, if DVC cache is corrupted or to start fresh (WARNING: will lose tracked data/models)
-.PHONY: dvc-reset
-dvc-reset:
-	@echo "Reset DVC tracking (WARNING: will lose tracked data/models)"
-	dvc repro --force 
-	
+	@dvc status && echo "Connected to DagsHub" || echo "Connection failed"	
 
 
 #################################################################################
@@ -244,40 +237,35 @@ api-drift-report:
 docker-build:
 	$(COMPOSE_CMD) build
 
-## Build airflow initialisation (one time before first docker-up-airflow)
+## Build airflow-init image (one time before first docker-up-airflow)
 .PHONY: docker-build-airflow
 docker-build-airflow:
 	$(COMPOSE_CMD) --profile airflow build airflow-init
 
-## Start stack — mode CLI subprocess (sans dvc/git runner)
+## Start stack — Mode 2 CLI subprocess (sans runners)
 .PHONY: docker-up-cli
 docker-up-cli:
 	EXECUTION_MODE=cli $(COMPOSE_CMD) up -d --build
 
-## Start stack — mode Docker exec (avec dvc/git runner via --profile docker)
+## Start stack — Mode 2 Docker exec (avec dvc/git runners)
 .PHONY: docker-up-docker
 docker-up-docker:
 	EXECUTION_MODE=docker $(COMPOSE_CMD) --profile docker up -d --build
 
-## Start stack — mode Airflow (avec CeleryExecutor, nécessite docker-up-docker)
-.PHONY: docker-up-airflow
-docker-up-airflow:
-	EXECUTION_MODE=docker $(COMPOSE_CMD) --profile airflow --profile docker up -d --build
+## Start stack — Mode 3 Airflow batch (stack cli + CeleryExecutor)
+.PHONY: docker-up-batch
+docker-up-batch:
+	EXECUTION_MODE=cli $(COMPOSE_CMD) --profile airflow up -d --build
 
-## Start stack — défaut (EXECUTION_MODE depuis .env, sans profil)
-.PHONY: docker-up
-docker-up:
-	$(COMPOSE_CMD) up -d --build
-
-## Stop services (keep volumes)
+## Stop all services, keep volumes
 .PHONY: docker-down
 docker-down:
-	$(COMPOSE_CMD) --profile docker down
+	$(COMPOSE_CMD) --profile docker --profile airflow down
 
-## Stop services + remove volumes (DANGER)
+## Stop all services + remove volumes (DANGER)
 .PHONY: docker-down-v
 docker-down-v:
-	$(COMPOSE_CMD) --profile docker down -v
+	$(COMPOSE_CMD) --profile docker --profile airflow down -v
 
 ## Show containers status
 .PHONY: docker-ps
@@ -303,44 +291,99 @@ docker-mode:
 	@docker inspect rakuten-train --format '{{range .Config.Env}}{{println .}}{{end}}' \
 		2>/dev/null | grep EXECUTION_MODE || echo "  api-train:  not running"
 
+#################################################################################
+# AIRFLOW — Mode 3
+#################################################################################
 
-#################################################################################
-# MLflow UI (Dagshub)
-#################################################################################
-.PHONY: mflow-ui
-mlflow-ui:
-	open https://dagshub.com/shiff-oumi/nov25cmlops_rakuten_dag.mlflow \
-	  2>/dev/null || xdg-open https://dagshub.com/shiff-oumi/nov25cmlops_rakuten_dag.mlflow	
+## Initialize Airflow DB and admin user (one time setup)
+.PHONY: airflow-init
+airflow-init:
+	EXECUTION_MODE=cli $(COMPOSE_CMD) --profile airflow run --rm airflow-init
 
-#################################################################################
-# Airflow UI
-#################################################################################
+## Trigger DAG manually
+.PHONY: airflow-trigger
+airflow-trigger:
+	@docker exec rakuten-airflow-scheduler \
+		airflow dags trigger rakuten_ml_pipeline
+
+## List last DAG runs
+.PHONY: airflow-runs
+airflow-runs:
+	@docker exec rakuten-airflow-scheduler \
+		airflow dags list-runs -d rakuten_ml_pipeline --limit 10
+
+## Set next batch number → make airflow-set-batch N=3
+.PHONY: airflow-set-batch
+airflow-set-batch:
+	@docker exec rakuten-airflow-scheduler \
+		airflow variables set next_batch_index $(N)
+
+## Open Airflow UI in browser
 .PHONY: airflow-ui
 airflow-ui:
-	open http://localhost:8080 \
-	  2>/dev/null || xdg-open http://localhost:8080
+	@open http://localhost:8080 2>/dev/null \
+		|| xdg-open http://localhost:8080 2>/dev/null \
+		|| explorer.exe http://localhost:8080 2>/dev/null \
+		|| echo "Open http://localhost:8080 in your browser"
 
 #################################################################################
-# Graphana UI (Prometheus + Grafana monitoring)
+# STREAMLIT
 #################################################################################
+
+## Open Streamlit dashboard in browser
+.PHONY: streamlit-ui
+streamlit-ui:
+	@open http://localhost:8501 2>/dev/null \
+		|| xdg-open http://localhost:8501 2>/dev/null \
+		|| explorer.exe http://localhost:8501 2>/dev/null \
+		|| echo "Open http://localhost:8501 in your browser"
+
+## Tail Streamlit logs
+.PHONY: streamlit-logs
+streamlit-logs:
+	$(COMPOSE_CMD) logs -f streamlit
+
+## Restart Streamlit service
+.PHONY: streamlit-restart
+streamlit-restart:
+	$(COMPOSE_CMD) restart streamlit
+
+
+#################################################################################
+# UIs
+#################################################################################
+
+## Open MLflow UI (DagsHub)
+.PHONY: mlflow-ui
+mlflow-ui:
+	@open https://dagshub.com/lioradatascientest/nov25cmlops_rakuten.mlflow 2>/dev/null \
+		|| xdg-open https://dagshub.com/lioradatascientest/nov25cmlops_rakuten.mlflow 2>/dev/null \
+		|| echo "Open https://dagshub.com/lioradatascientest/nov25cmlops_rakuten.mlflow in your browser"
+
+## Open Grafana UI
 .PHONY: grafana-ui
 grafana-ui:
-	open http://localhost:3000 \
-	  2>/dev/null || xdg-open http://localhost:3000
+	@open http://localhost:3000 2>/dev/null \
+		|| xdg-open http://localhost:3000 2>/dev/null \
+		|| explorer.exe http://localhost:3000 2>/dev/null \
+		|| echo "Open http://localhost:3000 in your browser"
+
+## Open Swagger UI
+.PHONY: swagger
+swagger:
+	@open https://localhost/docs 2>/dev/null \
+		|| xdg-open https://localhost/docs 2>/dev/null \
+		|| explorer.exe https://localhost/docs 2>/dev/null \
+		|| echo "Open https://localhost/docs in your browser"
 
 #################################################################################
-# QUICK SMOKE TESTS
+# SMOKE TESTS
 #################################################################################
 
-## Check gateway health (through nginx). Uses -k for self-signed TLS.
+## Quick health check through nginx
 .PHONY: smoke-health
 smoke-health:
 	curl -k -s https://localhost/health | cat
-
-## Open Swagger in browser (macOS). If not macOS, just open https://localhost/docs manually.
-.PHONY: swagger
-swagger:
-	open https://localhost/docs
 
 #################################################################################
 # HELP
@@ -353,9 +396,10 @@ import re, sys; \
 lines = '\n'.join([line for line in sys.stdin]); \
 matches = re.findall(r'\n## (.*)\n[\s\S]+?\n([a-zA-Z0-9_-]+):', lines); \
 print('Available rules:\n'); \
-print('\n'.join(['{:25}{}'.format(*reversed(match)) for match in matches]))
+print('\n'.join(['{:30}{}'.format(*reversed(match)) for match in matches]))
 endef
 export PRINT_HELP_PYSCRIPT
 
+.PHONY: help
 help:
 	@$(PYTHON_INTERPRETER) -c "${PRINT_HELP_PYSCRIPT}" < $(MAKEFILE_LIST)

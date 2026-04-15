@@ -2,7 +2,7 @@
 
 Classification de types de produits pour Rakuten France
 
-> Projet MLOps de bout en bout : ingestion de données, entraînement de modèle, exposition via API sécurisée, orchestration batch, monitoring et versioning.
+> Projet MLOps : pipeline complète d'entrainement, exposition via API sécurisée, orchestration en batch, monitoring et versioning.
 
 ---
 
@@ -28,115 +28,116 @@ Classification de types de produits pour Rakuten France
 
 ## Architecture globale
 
-Le projet suit une architecture microservices conteneurisée. Le même pipeline de données et d'entraînement est accessible via trois modes d'exécution distincts, selon le contexte (développement, API, automatisation batch).
+Le projet suit une architecture microservices conteneurisée. Le même pipeline de données et d'entraînement est accessible via trois modes d'exécution distincts, selon le contexte (développement, API, automatisation batch). Une interface Streamlit est positionnée devant la gateway.
 
 ```
 ┌───────────────────────────────────────────────────────────────────────┐
 │               MODES DE DÉCLENCHEMENT                                  │
 │                                                                       │
-│   Mode 1 — CLI local      make init-dvc / make ingest-dvc /(hors api) │
-│   Mode 2 — API curl       curl / Swagger → nginx → gateway → api-*    │
+│   Mode 1 — CLI local      make init-dvc / make ingest-dvc / make train│
+│   Mode 2 — API            curl / Swagger → nginx → gateway → api-*    │
 │            └── EXECUTION_MODE=cli    : subprocess (dans le container) │
 │            └── EXECUTION_MODE=docker : docker-in-docker (DID)         │
-│   Mode 3 — Airflow batch  DAG schedulé → subprocess → main.py         │
-└───────────────────────────────┬───────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                         CLIENT (curl / Swagger / Airflow)           │
-└────────────────────────────┬────────────────────────────────────────┘
-                             │ HTTPS (TLS auto-signé)
-                             ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                        NGINX (Reverse Proxy)                        │
-│  • Terminaison TLS                                                  │
-│  • Routage vers le service API Gateway                              │
-└────────────────────────────┬────────────────────────────────────────┘
-                             │ HTTP interne
-                             ▼
-┌────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│                       API GATEWAY (FastAPI)                                                        │
-│  • Authentification OAuth2 / Bearer Token                                                          │
-│  • Routage vers les services internes                                                              │
-└──────┬──────────────────┬──────────────────────┬──────────────────┬──────────────────┬─────────────┘
-       │                  │                      │                  │                  │
-       ▼                  ▼                      ▼                  ▼                  ▼
-┌────────────┐   ┌────────────────┐   ┌──────────────────┐   ┌──────────────┐   ┌──────────────────┐
-│  Ingest    │   │  Train Service │   │  Predict Service │   │  Init        │   │  Monitor Service │
-│  Service   │   │                │   │                  │   │  Service     │   │                  │
-│ (FastAPI)  │   │  • Pipeline    │   │  • Chargement    │   │              │   │  • Evidently     │
-│            │   │    complète    │   │    modèle MLflow │   │              │   │  • Drift report  │
-│ • Merge    │   │  • MLflow      │   │  • Inférence     │   │              │   │  • MLflow        │
-│   datasets │   │    tracking    │   │  • Top-K résult. │   │              │   │                  │
-└─────┬──────┘   └───────┬────────┘   └──────────────────┘   └──────┬───────┘   └──────────────────┘
-      │                  │                                          │
-      └──────────────────┼──────────────────────────────────────────┘
-                         │
-              ┌──────────┴──────────┐
-              │                     │
-              ▼                     ▼
-┌─────────────────────┐  ┌──────────────────────────────┐
-│  Stockage local     │  │  MLflow + DagsHub            │
-│  (volumes Docker)   │  │  • Tracking expériences      │
-│  • data/            │  │  • Métriques / artefacts     │
-│  • models/          │  │  • DVC remote (données)      │
-└─────────────────────┘  └──────────────────────────────┘
-                                     │
-              ┌──────────────────────┤
-              ▼                      ▼
-┌──────────────────┐      ┌────────────────────────┐
-│  Prometheus      │      │  Grafana               │
-│  • Métriques     │      │  • Dashboards          │
-└──────────────────┘      └────────────────────────┘
+│   Mode 3 — Airflow batch  DAG → DockerOperator → containers éphémères │
+└───────────────────────────┬───────────────────────────────────────────┘
+                            │
+                            ▼
+┌────────────────────────────────────────────────────────────────────┐
+│                    CLIENT (curl / Swagger / Streamlit / Airflow)   │
+└─────────────────────────┬──────────────────────────────────────────┘
+                          │ HTTPS (TLS auto-signé)
+                          ▼
+┌────────────────────────────────────────────────────────────────────┐
+│                       NGINX (Reverse Proxy)                        │
+│  • Terminaison TLS                                                 │
+│  • Routage vers l'API Gateway                                      │
+└─────────────────────────┬──────────────────────────────────────────┘
+                          │ HTTP interne
+                          ▼
+┌───────────────────────────────────────────────────────────────────────────────┐
+│                         API GATEWAY (FastAPI)                                 │
+│  • Authentification OAuth2 / Bearer Token                                     │
+│  • Routage vers les services internes                                         │
+└──────┬──────────────┬────────────────────┬──────────────┬──────────────┬──────┘
+       │              │                    │              │              │
+       ▼              ▼                    ▼              ▼              ▼
+┌──────────┐  ┌──────────────┐  ┌──────────────────┐  ┌────────┐  ┌──────────────┐
+│  Ingest  │  │    Train     │  │     Predict      │  │  Init  │  │   Monitor    │
+│ Service  │  │   Service    │  │    Service       │  │Service │  │   Service    │
+│(FastAPI) │  │              │  │                  │  │        │  │              │
+│          │  │ • Pipeline   │  │ • Chargement     │  │• Initialisation
+       │  │ • Evidently  │                                raw data
+│ • Merge  │  │   complète   │  │   modèle MLflow  │  │        │  │ • Drift      │
+│  datasets│  │ • MLflow     │  │ • Inférence      │  │        │  │   report     │
+│          │  │   tracking   │  │ • Top-K résult.  │  │        │  │ • MLflow     │
+└──────────┘  └──────────────┘  └──────────────────┘  └────────┘  └──────────────┘
+       │              │
+       └──────────────┼──────────────────────────────
+                      │
+           ┌──────────┴──────────┐
+           ▼                     ▼
+┌────────────────────┐  ┌──────────────────────────────┐
+│  Stockage local    │  │  MLflow + DagsHub            │
+│  (volumes Docker)  │  │  • Tracking expériences      │
+│  • data/           │  │  • Métriques / artefacts     │
+│  • models/         │  │  • DVC remote (données)      │
+└────────────────────┘  └──────────────────────────────┘
+                                    │
+             ┌──────────────────────┤
+             ▼                      ▼
+┌──────────────────┐     ┌────────────────────────┐
+│   Prometheus     │     │  Grafana               │
+│  • Métriques     │     │  • Dashboards          │
+└──────────────────┘     └────────────────────────┘
 ```
 
 ---
 
 ## Modes d'exécution
 
-Le projet expose **trois modes d'exécution** qui diffèrent par leur déclencheur et leur transport, mais partagent la même logique métier (`_dvc()`, `sync_*()`) via `utils/cli.py` (subprocess) ou `utils/docker.py` (docker exec).
-Le choix du transport est contrôlé par la variable `EXECUTION_MODE`, uniquement pertinente pour le Mode 2.
-```
-                        ┌─────────────────────────────────────────┐
-                        │           Logique partagée              │
-                        │  utils/cli.py                           │
-                        │  utils/docker.py                        │
-                        └────────────┬────────────────────────────┘
-                                     │
-          ┌──────────────────────────┼──────────────────────────┐
-          ▼                          ▼                          ▼
-┌──────────────────┐      ┌──────────────────────┐      ┌──────────────────┐
-│   Mode 1 — CLI   │      │    Mode 2 — API       │      │ Mode 3 — Airflow │
-│                  │      │                       │      │                  │
-│  main.py (typer) │      │  api/train.py         │      │  DAG → subprocess│
-│  init / ingest   │      │  (FastAPI)            │      │  → main.py       │
-│  train / predict │      │  POST /train          │      │                  │
-└──────────────────┘      └──────────┬────────────┘      └──────────────────┘
-  make train-dvc                     │                     automatique
-  terminal / debug                   │                     lundi 3h00
-                         ┌───────────┴───────────┐
-                         ▼                       ▼
-               ┌──────────────────┐   ┌─────────────────────┐
-               │ EXECUTION_MODE   │   │  EXECUTION_MODE     │
-               │     = cli        │   │     = docker        │
-               │                  │   │                     │
-               │ subprocess       │   │ docker exec         │
-               │ → dvc/git        │   │ → dvc-runner        │
-               │   (in container) │   │ → git-runner        │
-               └──────────────────┘   └─────────────────────┘
-```
+Le projet expose **trois modes d'exécution** qui diffèrent par leur déclencheur et leur transport, mais partagent la même logique métier via les modules `pipelines/` et `modules/`.
 
 ### Vue d'ensemble
 
 ```
-┌─────────────────┬────────────────────┬──────────────────────────────┐
-│ Mode            │ Déclencheur        │ Transport                    │
-├─────────────────┼────────────────────┼──────────────────────────────┤
-│ CLI local       │ make / terminal    │ subprocess direct            │
-│ API curl        │ humain / Swagger   │ HTTP → nginx → gateway       │
-│ Airflow batch   │ scheduler / cron   │ DAG → subprocess → main.py   │
-└─────────────────┴────────────────────┴──────────────────────────────┘
+┌─────────────────┬────────────────────┬────────────────────────────────────────┐
+│ Mode            │ Déclencheur        │ Transport                              │
+├─────────────────┼────────────────────┼────────────────────────────────────────┤
+│ CLI local       │ make / terminal    │ subprocess direct (hors Docker)        │
+│ API             │ humain / Swagger   │ HTTP → nginx → gateway → api-*         │
+│ Airflow batch   │ scheduler / manuel │ DockerOperator → containers éphémères  │
+└─────────────────┴────────────────────┴────────────────────────────────────────┘
 ```
+
+```
+                     ┌─────────────────────────────────────────┐
+                     │           Logique métier partagée        │
+                     │  pipelines/ · modules/ · monitoring/     │
+                     └──────────┬──────────────────────────────┘
+                                │
+        ┌───────────────────────┼───────────────────────────┐
+        ▼                       ▼                           ▼
+┌──────────────────┐  ┌──────────────────────┐  ┌──────────────────────────┐
+│  Mode 1 — CLI    │  │   Mode 2 — API        │  │   Mode 3 — Airflow       │
+│                  │  │                       │  │                          │
+│  main.py (Typer) │  │  FastAPI (api-*)       │  │  DAG rakuten_ml_pipeline │
+│  make ingest-dvc │  │  POST /ingest, /train  │  │  DockerOperator          │
+│  make train-dvc  │  │                       │  │  → containers éphémères  │
+└──────────────────┘  └──────────┬────────────┘  └──────────────────────────┘
+  subprocess direct               │
+  (machine locale)     ┌──────────┴──────────┐
+                       ▼                     ▼
+             ┌──────────────────┐  ┌─────────────────────┐
+             │ EXECUTION_MODE   │  │  EXECUTION_MODE      │
+             │     = cli        │  │     = docker         │
+             │                  │  │                      │
+             │ subprocess       │  │  docker exec         │
+             │ → dvc/git        │  │  → dvc-runner        │
+             │   (in container) │  │  → git-runner        │
+             └──────────────────┘  └─────────────────────┘
+```
+
+---
 
 ### Mode 1 — CLI local
 
@@ -149,10 +150,14 @@ python mlops_rakuten/main.py ingest data/raw/rakuten/seeds/rakuten_batch_0001.cs
 # Entraînement
 python mlops_rakuten/main.py train
 
-# Ou via Makefile
+# Via Makefile
 make ingest-dvc CSV=rakuten_batch_0001.csv
 make train-dvc
 ```
+
+**Transport :** `main.py` (Typer) appelle directement `utils/cli.py`, qui exécute `dvc` et `git` via `subprocess`.
+
+---
 
 ### Mode 2 — API Docker
 
@@ -164,28 +169,30 @@ Les services FastAPI (`api-ingest`, `api-train`) exécutent DVC et Git via **sub
 
 ```bash
 make docker-up-cli
-# Lance : nginx + gateway + api-ingest + api-train + api-predict + api-monitor
-#       + prometheus + grafana + nginx_exporter + node-exporter
 ```
+
+Lance : `nginx` + `gateway` + `api-ingest` + `api-train` + `api-predict` + `api-monitor`
+      + `prometheus` + `grafana` + `nginx_exporter` + `node-exporter`
 
 #### EXECUTION_MODE=docker (docker-in-docker)
 
-Les services FastAPI délèguent DVC et Git à des containers dédiés (`dvc-runner`, `git-runner`) via `docker exec`. Première approche développée, conservée à titre pédagogique pour illustrer une architecture microservices avancée — moins optimal que le mode `cli` en raison du double niveau de conteneurisation.
+Les services FastAPI délèguent DVC et Git à des containers dédiés (`dvc-runner`, `git-runner`) via `docker exec`.
 
 ```bash
 make docker-up-docker
-# Lance : tous les services + dvc-runner + git-runner
 ```
 
+Lance : tous les services + `dvc-runner` + `git-runner`
+
 ```
-EXECUTION_MODE=cli                    EXECUTION_MODE=docker
-──────────────────────────────────    ────────────────────────────────────
-api-ingest                            api-ingest
-  └── subprocess → dvc/git              └── docker exec → rakuten-dvc-runner
-                                                        → rakuten-git-runner
+EXECUTION_MODE=cli                       EXECUTION_MODE=docker
+────────────────────────────────────     ────────────────────────────────────
+api-ingest                               api-ingest
+  └── subprocess → dvc/git                 └── docker exec → rakuten-dvc-runner
+        (dans le container api-ingest)                      → rakuten-git-runner
 ```
 
-**Appels API (identiques dans les deux sous-modes) :**
+**Appels API une fois les containers lancés :**
 
 ```bash
 make api-token                              # récupérer un JWT
@@ -195,9 +202,81 @@ make api-train                              # entraîner
 make api-predict TEXT="Vélo électrique" TOPK=3
 ```
 
-### Mode 3 — Airflow batch (automatisé)
+---
 
-A implementer
+### Mode 3 — Airflow batch
+
+Orchestration automatisée du pipeline complet via le DAG `rakuten_ml_pipeline`.
+
+**Transport :** contrairement aux modes 1 et 2, le worker Airflow ne fait pas de subprocess directement. Il utilise le `DockerOperator`, qui lance un **container Docker éphémère** pour chaque tâche. C'est à l'intérieur de ce container que `python -m mlops_rakuten.main ...` s'exécute.
+
+```
+Airflow worker (Celery)
+    └── DockerOperator
+          ├── tâche ingest   → container éphémère (image api-ingest)
+          │                        └── subprocess → main.py ingest
+          ├── tâche train    → container éphémère (image api-train)
+          │                        └── subprocess → main.py train
+          ├── tâche validate → container éphémère (image api-predict)
+          │                        └── subprocess → main.py predict
+          └── tâche drift    → container éphémère (image api-ingest)
+                                   └── run_drift_report() [appel Python direct]
+```
+
+Chaque container éphémère monte les mêmes **volumes nommés** que la stack principale (`rakuten_models`, `rakuten_reports`, etc.) ainsi qu'un **bind mount** sur le répertoire du projet et sur `~/.ssh`.
+
+#### Bind mounts — configuration requise
+
+Les mounts hôte sont résolus dynamiquement dans le DAG :
+
+```python
+# PROJECT_ROOT : priorité à la variable d'env, sinon déduit depuis __file__
+PROJECT_ROOT = os.environ.get("PROJECT_ROOT", str(Path(__file__).resolve().parent.parent))
+
+# SSH_DIR : priorité à la variable d'env, sinon $HOME/.ssh
+SSH_DIR = os.environ.get("SSH_DIR", str(Path.home() / ".ssh"))
+```
+
+Pour forcer un chemin spécifique (machine partagée, CI), ajouter dans `.env` ou dans la config Airflow :
+
+```dotenv
+PROJECT_ROOT=/chemin/absolu/vers/nov25cmlops_rakuten
+SSH_DIR=/home/mon_user/.ssh
+```
+
+> Ces chemins doivent être valides sur **l'hôte Docker** (là où tourne le daemon), pas dans le container Airflow.
+
+#### DAG — rakuten_ml_pipeline
+
+```
+Déclenchement : manuel (schedule_interval=None)
+→ En prod, remplacer par un FileSensor sur data/uploads/
+
+ingest → train → validate → drift_monitor
+                               ↑
+                    trigger_rule="all_done"
+                    (tourne même si validate échoue)
+```
+
+| Tâche | Image | Commande | Notes |
+|---|---|---|---|
+| `ingest` | `api-ingest` | `main.py ingest <csv>` | Itère sur tous les CSV de `data/uploads/`, skip si vide |
+| `train` | `api-train` | `main.py train` | dvc repro + sync Git/MLflow |
+| `validate` | `api-predict` | `main.py predict <texte>` | Smoke-test du modèle `@production` |
+| `drift_monitor` | `api-ingest` | `run_drift_report()` | Rapport Evidently, lié au run MLflow courant |
+
+#### Démarrage Airflow
+
+```bash
+# 1. Initialiser la base Airflow (une seule fois)
+make airflow-init
+
+# 2. Lancer la stack complète avec Airflow
+make docker-up-batch
+
+# 3. Interface Airflow
+make airflow-ui    # → http://localhost:8080  (admin/admin)
+``` 
 
 ### Commits Git par mode
 
@@ -217,9 +296,7 @@ a3f1c2e  Airflow:train          — model v26, f1_macro=0.7750  ← automatique 
 
 | Préfixe de commit       | Mode                          | Déclencheur        |
 |-------------------------|-------------------------------|--------------------|
-| `CLI-local:ingest`      | Mode 1 — local                | make / terminal    |
 | `CLI-local:train`       | Mode 1 — local                | make / terminal    |
-| `CLI:ingest`            | Mode 2 — subprocess container | curl / Swagger     |
 | `Docker-CLI:train`      | Mode 2 — subprocess container | curl / Swagger     |
 | `Docker-in-Docker:train`| Mode 2 — docker-in-docker     | curl / Swagger     |
 | `Airflow:ingest`        | Mode 3 — batch                | scheduler / cron   |
@@ -331,7 +408,7 @@ Le pipeline commite et pousse automatiquement vers GitHub à chaque ingestion et
 
 ### Clé SSH
 
-La clé SSH est montée dans les containers via le volume `~/.ssh:/root/.ssh` (voir `docker-compose.yml`). Elle doit être active et reconnue par GitHub :
+La clé SSH est montée dans les containers via le volume `~/.ssh:/root/.ssh`. Elle doit être active et reconnue par GitHub :
 
 Commencer par vérifier les clés existantes :
 ```bash
@@ -356,21 +433,10 @@ cat ~/.ssh/id_github.pub
 
 ### Fork et remote
 
-Le push automatique cible le remote `myfork` par défaut (configuré dans `sync_git_dvc` de `utils/sync_core.py`). Chaque personne doit ajouter son fork comme remote :
+Le push automatique cible le remote `origin` par défaut (configuré dans `sync_git_dvc` de `utils/sync_core.py`). Il faut bien vérifier que la bonne cible est bien paramétré.
 
 ```bash
-git remote add myfork git@github.com:<ton-user>/nov25cmlops_rakuten_dag.git
-git remote -v   # vérifier : origin → repo principal, myfork → ton fork
-```
-
-Si ton fork porte un autre nom, deux options :
-
-```bash
-# Option 1 — renommer ton remote existant
-git remote rename origin myfork
-
-# Option 2 — passer le nom dans sync_git_dvc()
-sync_git_dvc(..., git_remote="ton-remote")
+git remote -v   # vérifier : origin → repo principal
 ```
 
 ### Branche de travail
@@ -391,6 +457,7 @@ make api-train        # → commit + push automatique sur feature/<nom>
 | Fork ajouté | `git remote add myfork git@github.com:<user>/...` |
 | Branche créée | `git checkout -b feature/<nom>` |
 | Variables .env | copier `.env.example` → `.env` et renseigner les tokens |
+| (Airflow) PROJECT_ROOT | renseigner dans `.env` si la détection auto échoue |
 
 ---
 
@@ -490,7 +557,7 @@ Après évaluation
 
 ```bash
 dvc remote add origin s3://dvc
-dvc remote add origin https://dagshub.com/shiff-oumi/nov25cmlops_rakuten_dag.s3
+dvc remote add origin https://dagshub.com/lioradatascientest/nov25cmlops_rakuten.s3
 dvc remote modify origin --local access_key_id your_token
 dvc remote modify origin --local secret_access_key your_token
 
@@ -515,10 +582,11 @@ dvc pull   # ← DagsHub S3
 | `api-predict` | Inférence                               | interne | toujours   |
 | `prometheus`  | Métriques                               | 9090    | toujours   |
 | `grafana`     | Dashboards                              | 3000    | toujours   |
+| `streamlit`   | Interface Graphique                     | 8501    | toujours   |
 | `api-monitor` | Drift monitoring Evidently              | interne | toujours   |
 | `dvc-runner`  | DVC isolé (docker-in-docker)            | interne | `docker`   |
 | `git-runner`  | Git isolé (docker-in-docker)            | interne | `docker`   |
-| `airflow`     | Orchestration batch                     | 8080   | `airflow`    |
+| `airflow-*`   | Orchestration batch                     | 8080    | `airflow`  |
 
 ### SSH et commits automatiques
 
@@ -536,8 +604,6 @@ volumes:
 
 ```bash
 make docker-up-cli
-make docker-ps
-make api-health
 
 make api-init
 make api-ingest CSV=rakuten_batch_0001.csv
@@ -554,7 +620,7 @@ automatiquement au démarrage.
 
 ```bash
 make docker-up-docker
-docker ps | grep runner   # vérifier que les runners sont UP
+
 make api-ingest CSV=rakuten_batch_0002.csv
 make api-train
 ```
@@ -569,24 +635,84 @@ make swagger   # → https://localhost/docs
 
 ## Orchestration batch avec Airflow
 
+### Architecture du Mode 3
+
+Le Mode 3 se distingue fondamentalement des modes 1 et 2 par son transport. Le worker Airflow (Celery) ne fait **pas** de subprocess directement : il instancie un `DockerOperator` qui lance un container Docker éphémère pour chaque tâche. C'est **à l'intérieur** de ce container que le code Python s'exécute.
+
+```
+Airflow worker (Celery)
+    └── DockerOperator (via /var/run/docker.sock)
+          │
+          ├── tâche ingest    → container éphémère, image api-ingest
+          │                         └── subprocess → main.py ingest <csv>
+          │                               └── utils/cli.py → dvc, git
+          │
+          ├── tâche train     → container éphémère, image api-train
+          │                         └── subprocess → main.py train
+          │                               └── utils/cli.py → dvc repro, git, MLflow
+          │
+          ├── tâche validate  → container éphémère, image api-predict
+          │                         └── subprocess → main.py predict <texte>
+          │                               └── MLflow → chargement @production
+          │
+          └── tâche drift     → container éphémère, image api-ingest
+                                    └── run_drift_report() [appel Python direct]
+                                          └── Evidently + MLflow logging
+```
+
+Chaque container éphémère est supprimé après exécution (`auto_remove="success"`). Les données persistent via les volumes nommés Docker partagés avec la stack principale.
+
+### DAG — rakuten_ml_pipeline
+
+```
+Déclenchement : manuel (schedule_interval=None)
+→ En prod : remplacer par un FileSensor sur data/uploads/
+
+ingest ──► train ──► validate ──► drift_monitor
+                                       ↑
+                           trigger_rule="all_done"
+                           tourne même si validate échoue
+```
+
+### Bind mounts
+
+Chaque container éphémère a besoin d'accéder au code source et aux clés SSH sur l'hôte. Ces chemins sont résolus dynamiquement :
+
+```python
+# Déduit depuis l'emplacement du DAG lui-même
+PROJECT_ROOT = os.environ.get("PROJECT_ROOT",
+    str(Path(__file__).resolve().parent.parent))
+
+# $HOME/.ssh par défaut
+SSH_DIR = os.environ.get("SSH_DIR",
+    str(Path.home() / ".ssh"))
+```
+
+Si la détection automatique ne convient pas (utilisateur différent, CI, chemin non standard), définir dans `.env` :
+
+```dotenv
+PROJECT_ROOT=/chemin/absolu/vers/nov25cmlops_rakuten
+SSH_DIR=/home/mon_user/.ssh
+```
+
+> Ces chemins doivent être valides sur l'**hôte Docker**, pas dans le container Airflow.
+
 ### Démarrage
 
 ```bash
-make docker-up-batch
-make airflow-ui    # → http://localhost:8080  (admin/admin)
+make airflow-init      # initialise la DB Airflow (une seule fois)
+make docker-up-batch   # lance stack cli + Airflow
+make airflow-ui        # → http://localhost:8080  (admin/admin)
 ```
 
-### DAG — rakuten_batch_pipeline
+### Commandes Airflow
 
+```bash
+make airflow-trigger          # déclencher manuellement
+make airflow-runs             # voir les derniers runs
+make airflow-set-batch N=3    # configurer le prochain batch
+make airflow-ui               # ouvrir l'interface
 ```
-Schedule : 0 3 * * 1  (tous les lundis à 3h)
-
-check_batch
-    ├── CSV trouvé → ingest_batch → train_model → increment_batch
-    └── CSV absent → no_batch (skip)
-```
-
-Le DAG réutilise `mlops_rakuten.utils.cli` directement — même transport subprocess que le Mode CLI.
 
 ---
 
