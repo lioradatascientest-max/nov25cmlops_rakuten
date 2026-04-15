@@ -188,7 +188,7 @@ stages:
       size: 458
     - path: data/processed/tfidf_vectorizer.pkl
       hash: md5
-      md5: b8737e13d5a03b0da6c248db59e386b0
+      md5: f5683a1fd5f982ce739c6141431f1d78
       size: 778079
     - path: data/processed/y_train.npy
       hash: md5
@@ -242,8 +242,8 @@ stages:
       size: 81
     - path: models/mlflow_run_metadata.json
       hash: md5
-      md5: 9d008407e10e9ac4072ab8d7dd6a77a1
-      size: 120
+      md5: a3c6cfd0190d21bc609cda57857210d0
+      size: 121
     - path: models/model_config.json
       hash: md5
       md5: a6696523f42578cd80fe5ae40bd11241
@@ -269,8 +269,8 @@ stages:
       size: 992
     - path: models/mlflow_run_metadata.json
       hash: md5
-      md5: 9d008407e10e9ac4072ab8d7dd6a77a1
-      size: 120
+      md5: a3c6cfd0190d21bc609cda57857210d0
+      size: 121
     - path: models/text_classifier.pkl
       hash: md5
       md5: a0a650fff7002802ee7bfbc333595dcb
