@@ -1,7 +1,8 @@
+import os
+
+from components.auth import is_admin, is_authenticated, login_form, logout
 import streamlit as st
 import streamlit.components.v1 as components
-from components.auth import login_form, logout, is_authenticated, is_admin
-import os
 
 st.set_page_config(
     page_title="Rakuten MLOps",
@@ -25,6 +26,7 @@ with st.sidebar:
         st.page_link("pages/1_predict.py",    label="Prédiction",  icon="🔍")
         st.page_link("pages/2_pipeline.py",   label="Pipeline",    icon="⚙️")
         st.page_link("pages/3_monitoring.py", label="Monitoring",  icon="📊")
+        st.page_link("pages/4_presentation.py", label="Présentation", icon="🎤")
     else:
         st.page_link("pages/1_predict.py", label="Prédiction", icon="🔍")
     st.divider()
@@ -33,7 +35,8 @@ with st.sidebar:
 
 # ── Page d'accueil ────────────────────────────────────────────────────────────
 st.title("🛍️ Rakuten MLOps — Dashboard")
-st.caption("Plateforme de classification automatique de produits e-commerce · Rakuten France")
+st.caption(
+    "Plateforme de classification automatique de produits e-commerce · Rakuten France")
 
 st.divider()
 
@@ -49,8 +52,10 @@ if not is_admin():
 
     col1, col2, col3 = st.columns(3)
     col1.metric("Catégories", "27", help="Nombre de catégories prdtypecode")
-    col2.metric("Modèle", "TF-IDF + classifieur", help="Pipeline scikit-learn tracké via MLflow")
-    col3.metric("Top-k", "1 à 10", help="Nombre de catégories retournées par /predict")
+    col2.metric("Modèle", "TF-IDF + classifieur",
+                help="Pipeline scikit-learn tracké via MLflow")
+    col3.metric("Top-k", "1 à 10",
+                help="Nombre de catégories retournées par /predict")
 
     st.divider()
     st.subheader("Comment ça marche ?")
@@ -60,7 +65,8 @@ if not is_admin():
     c3.info("**3 — Résultat**\n\nCode catégorie + nom + probabilité associée")
 
     st.divider()
-    st.page_link("pages/1_predict.py", label="🔍 Aller à la prédiction", use_container_width=True)
+    st.page_link("pages/1_predict.py",
+                 label="🔍 Aller à la prédiction", use_container_width=True)
     st.stop()
 
 # ── Vue ADMIN ─────────────────────────────────────────────────────────────────
@@ -68,15 +74,14 @@ if not is_admin():
 # ── Badges liens externes ─────────────────────────────────────────────────────
 DAGSHUB_USER = os.getenv("DAGSHUB_USER", "")
 DAGSHUB_REPO = os.getenv("DAGSHUB_REPO", "")
-GITHUB_REPO  = os.getenv("GITHUB_REPO", "")
-GITHUB_USER  = os.getenv("GITHUB_USER", "")
-AIRFLOW_URL  = os.getenv("AIRFLOW_URL", "http://localhost:8080")
-GRAFANA_URL  = os.getenv("GRAFANA_URL", "http://localhost:3000")
+GITHUB_REPO = os.getenv("GITHUB_REPO", "")
+GITHUB_USER = os.getenv("GITHUB_USER", "")
+AIRFLOW_URL = os.getenv("AIRFLOW_URL", "http://localhost:8080")
+GRAFANA_URL = os.getenv("GRAFANA_URL", "http://localhost:3000")
 
 dagshub_url = f"https://dagshub.com/{DAGSHUB_USER}/{DAGSHUB_REPO}"
-mlflow_url  = f"https://dagshub.com/{DAGSHUB_USER}/{DAGSHUB_REPO}.mlflow"
-github_url  = f"https://github.com/{GITHUB_USER}/{GITHUB_REPO}"
-
+mlflow_url = f"https://dagshub.com/{DAGSHUB_USER}/{DAGSHUB_REPO}.mlflow"
+github_url = f"https://github.com/{GITHUB_USER}/{GITHUB_REPO}"
 
 
 st.subheader("Liens externes")
@@ -95,21 +100,21 @@ st.divider()
 st.subheader("Architecture du système")
 
 st.code("""
-         ┌─────────────────────────┐
+.        ┌─────────────────────────┐
          │       Streamlit UI      │
          └────────────┬────────────┘
                       │ HTTP / JWT
-         ┌────────────▼────────────┐
-         │     Gateway FastAPI     │
-         │  Auth · routing · proxy │
-         └──┬────┬──────┬───────┬──┘
-            │    │      │       │
-     ┌──────▼─┐ ┌▼─────┐ ┌─────▼──┐ ┌───────▼──┐
+         ┌────────────▼────────────────┐
+         │       Gateway FastAPI       │
+         │    Auth · routing · proxy   │
+         └──┬────┬─────────────┬─────┬─┘
+            │    │             │     │
+     ┌──────▼─┐ ┌▼─────┐ ┌─────▼──┐ ┌▼─────────┐
      │ingest  │ │train │ │predict │ │ monitor  │
      │CSV·DVC │ │TF-IDF│ │top-k   │ │Evidently │
-     └────────┘ └──┬───┘ └───┬────┘ └────┬─────┘
-                   │         │            │
-         ┌─────────▼─────────▼────────────▼──┐
+     └─────┬──┘ └──┬───┘ └───┬────┘ └────┬─────┘
+           │       │         │           │
+         ┌─▼───────▼─────────▼───────────▼────┐
          │        MLflow · DagsHub · DVC      │
          └────────────────────────────────────┘
 
@@ -133,7 +138,12 @@ st.divider()
 
 # ── Accès rapide ──────────────────────────────────────────────────────────────
 st.subheader("Accès rapide")
-col1, col2, col3 = st.columns(3)
-col1.page_link("pages/1_predict.py",    label="🔍 Prédiction",  use_container_width=True)
-col2.page_link("pages/2_pipeline.py",   label="⚙️ Pipeline",   use_container_width=True)
-col3.page_link("pages/3_monitoring.py", label="📊 Monitoring", use_container_width=True)
+col1, col2, col3, col4 = st.columns(4)
+col1.page_link("pages/1_predict.py",    label="🔍 Prédiction",
+               use_container_width=True)
+col2.page_link("pages/2_pipeline.py",   label="⚙️ Pipeline",
+               use_container_width=True)
+col3.page_link("pages/3_monitoring.py", label="📊 Monitoring",
+               use_container_width=True)
+col4.page_link("pages/4_presentation.py", label="🎤 Présentation",
+               use_container_width=True)
