@@ -229,7 +229,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ~/.ssh:/root/.ssh
     networks: [rakuten-net]
-    restart: "no"
+    #restart: "no"
+    restart: unless-stopped
     environment:
       - GIT_AUTHOR_NAME=${GIT_AUTHOR_NAME}
       - GIT_AUTHOR_EMAIL=${GIT_AUTHOR_EMAIL}
@@ -261,7 +262,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ~/.ssh:/root/.ssh
     networks: [rakuten-net]
-    restart: "no"
+    #restart: "no"
+    restart: unless-stopped
     environment:
       - GIT_AUTHOR_NAME=${GIT_AUTHOR_NAME}
       - GIT_AUTHOR_EMAIL=${GIT_AUTHOR_EMAIL}

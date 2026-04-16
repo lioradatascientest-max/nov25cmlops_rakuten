@@ -44,7 +44,8 @@ echo "[Git] Configured to use SSH for GitHub"
 
 if [ -d "/app/.dvc" ]; then
     if [ -n "$DAGSHUB_USER" ] && [ -n "$DAGSHUB_REPO" ]; then
-        DVC_REMOTE_URL="https://dagshub.com/${DAGSHUB_USER}/${DAGSHUB_REPO}.s3"
+        #DVC_REMOTE_URL="https://dagshub.com/${DAGSHUB_USER}/${DAGSHUB_REPO}.s3"
+        DVC_REMOTE_URL="https://dagshub.com/${DAGSHUB_USER}/${DAGSHUB_REPO}.dvc"
         dvc remote add -d origin "$DVC_REMOTE_URL" >/dev/null 2>&1 || \
         dvc remote modify origin url "$DVC_REMOTE_URL" >/dev/null 2>&1 || \
         echo "[Warning] Unable to configure DVC remote origin"

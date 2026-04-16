@@ -72,6 +72,7 @@ GITHUB_REPO  = os.getenv("GITHUB_REPO", "")
 GITHUB_USER  = os.getenv("GITHUB_USER", "")
 AIRFLOW_URL  = os.getenv("AIRFLOW_URL", "http://localhost:8080")
 GRAFANA_URL  = os.getenv("GRAFANA_URL", "http://localhost:3000")
+DOCKER_HUB_URL = os.getenv("DOCKER_HUB_URL", "https://hub.docker.com/repositories/lioradatascientest")
 
 dagshub_url = f"https://dagshub.com/{DAGSHUB_USER}/{DAGSHUB_REPO}"
 mlflow_url  = f"https://dagshub.com/{DAGSHUB_USER}/{DAGSHUB_REPO}.mlflow"
@@ -86,6 +87,7 @@ st.markdown(f"""
 [![GitHub](https://img.shields.io/badge/GitHub-Source-181717?style=for-the-badge&logo=github)]({github_url})
 [![Airflow](https://img.shields.io/badge/Airflow-DAGs-017CEE?style=for-the-badge&logo=apacheairflow&logoColor=white)]({AIRFLOW_URL})
 [![Grafana](https://img.shields.io/badge/Grafana-Dashboards-F46800?style=for-the-badge&logo=grafana&logoColor=white)]({GRAFANA_URL})
+[![Docker Hub](https://img.shields.io/badge/Docker%20Hub-Images-0db7ed?style=for-the-badge&logo=docker&logoColor=white)]({DOCKER_HUB_URL})
 """, unsafe_allow_html=True)
 
 
