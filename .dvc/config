@@ -1,5 +1,7 @@
 [core]
     remote = origin
     autostage = true
+    check_update = false
 ['remote "origin"']
-    url = https://dagshub.com/lioradatascientest/nov25cmlops_rakuten.s3
+    url = s3://dvc
+    endpointurl = https://dagshub.com/lioradatascientest/nov25cmlops_rakuten.s3
