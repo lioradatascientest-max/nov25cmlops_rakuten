@@ -34,10 +34,11 @@ jobs:
 
       - name: DVC Pull
         run: |
-          python -m dvc remote modify origin auth basic
-          python -m dvc remote modify origin user lioradatascientest
-          python -m dvc remote modify origin password ${{ secrets.DAGSHUB_TOKEN }}
           python -m dvc pull
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.DAGSHUB_TOKEN }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.DAGSHUB_TOKEN }}
+
 
       - name: Create missing directories and dummy data
         run: |
