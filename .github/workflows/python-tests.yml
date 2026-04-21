@@ -9,7 +9,7 @@ on:
       - development
 
 jobs:
-  # PREMIER JOB : Les Tests - repo liora - dagshub liora v1
+  # PREMIER JOB : Les Tests - repo liora - dagshub liora v1 - test v1
   test-suite:
     runs-on: ubuntu-latest
     env:
