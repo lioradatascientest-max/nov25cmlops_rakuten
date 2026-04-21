@@ -29,7 +29,7 @@ REFERENCE_PATH = Path(os.getenv(
 ))
 UPLOADS_DIR = Path(os.getenv(
     "UPLOADS_DIR",
-    "/app/data/uploads"
+    "/app/data/raw/uploads"
 ))
 SEEDS_DIR = Path(os.getenv(
     "SEEDS_DIR",
