@@ -3,10 +3,10 @@ name: CI/CD MLOps Rakuten
 on:
   push:
     branches: 
-      - development
+      - demo_test_config
   pull_request:
     branches: 
-      - development
+      - demo_test_config
 
 jobs:
   # PREMIER JOB : Les Tests - repo liora - dagshub liora v1 - test v1
